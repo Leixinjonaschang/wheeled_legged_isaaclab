@@ -1,4 +1,4 @@
-"""Script to play a checkpoint if an RL agent from RSL-RL."""
+"""Play a trained RL agent with the vendored RSL-RL."""
 
 """Launch Isaac Sim Simulator first."""
 
@@ -6,152 +6,128 @@ import argparse
 import os
 import sys
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../rsl_rl")))
+VENDORED_RSL_RL = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../rsl_rl"))
+sys.path.insert(0, VENDORED_RSL_RL)
 
 from isaaclab.app import AppLauncher
 
-# local imports
 import cli_args  # isort: skip
 
-# add argparse arguments
-parser = argparse.ArgumentParser(description="Train an RL agent with RSL-RL.")
-parser.add_argument("--video", action="store_true", default=False, help="Record videos during training.")
+parser = argparse.ArgumentParser(description="Play a checkpoint of an RL agent from RSL-RL.")
+parser.add_argument("--video", action="store_true", default=False, help="Record a video during playback.")
 parser.add_argument("--video_length", type=int, default=200, help="Length of the recorded video (in steps).")
-parser.add_argument(
-    "--disable_fabric", action="store_true", default=False, help="Disable fabric and use USD I/O operations."
-)
 parser.add_argument("--num_envs", type=int, default=None, help="Number of environments to simulate.")
-parser.add_argument("--task", type=str, default=None, help="Name of the task.")
-parser.add_argument("--seed", type=int, default=None, help="Seed used for the environment")
-parser.add_argument("--checkpoint_path", type=str, default=None, help="Relative path to checkpoint file.")
-
-# append RSL-RL cli arguments
+parser.add_argument("--task", type=str, required=True, help="Name of the task.")
+parser.add_argument("--seed", type=int, default=None, help="Seed used for the environment.")
+parser.add_argument("--checkpoint_path", type=str, default=None, help="Explicit checkpoint file to load.")
+parser.add_argument("--steps", type=int, default=None, help="Stop after this many steps instead of running forever.")
+parser.add_argument("--export_onnx", action="store_true", default=False, help="Export ONNX and exit.")
+parser.add_argument(
+    "--policy_role",
+    type=str,
+    default="student",
+    choices=("student", "teacher"),
+    help=(
+        "Which path of a teacher-student policy to run. The student sees only "
+        "proprioception and is what deploys; the teacher sees privileged observations "
+        "and is useful for checking how much the distillation gave up. Ignored by plain PPO."
+    ),
+)
 cli_args.add_rsl_rl_args(parser)
-# append AppLauncher cli args
 AppLauncher.add_app_launcher_args(parser)
 args_cli = parser.parse_args()
 
 if args_cli.video:
     args_cli.enable_cameras = True
 
-# launch omniverse app
 app_launcher = AppLauncher(args_cli)
 simulation_app = app_launcher.app
 
 """Rest everything follows."""
 
+import dataclasses
+from pathlib import Path
 
 import gymnasium as gym
-import os
 import torch
 
-from rsl_rl.runner import OnPolicyRunner
+import rsl_rl
 
-from isaaclab.envs import ManagerBasedRLEnvCfg,DirectMARLEnv, multi_agent_to_single_agent
-from isaaclab.utils.dict import print_dict
+_RESOLVED_RSL_RL = Path(rsl_rl.__file__).resolve()
+assert str(_RESOLVED_RSL_RL).startswith(str(Path(VENDORED_RSL_RL).resolve())), (
+    f"Expected the vendored rsl_rl under {VENDORED_RSL_RL}, but imported {_RESOLVED_RSL_RL}."
+)
+
 from isaaclab_tasks.utils import get_checkpoint_path, parse_env_cfg
-from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlVecEnvWrapper
-# Import extensions to set up environment tasks
-import bipedal_locomotion  # noqa: F401
-from bipedal_locomotion.utils.wrappers.rsl_rl import RslRlPpoAlgorithmMlpCfg, export_mlp_as_onnx, export_policy_as_jit
+
+import bipedal_locomotion  # noqa: F401  (importing registers the gym tasks)
+from bipedal_locomotion.utils.wrappers.rsl_rl import (
+    WheeledLeggedRslRlVecEnvWrapper,
+    WheeledLeggedVelocityOnPolicyRunner,
+)
 
 
-def main():
-    """Play with RSL-RL agent."""
-    # parse configuration
-    env_cfg: ManagerBasedRLEnvCfg = parse_env_cfg(
-        task_name=args_cli.task, device=args_cli.device, num_envs=args_cli.num_envs
+def _select_policy(policy, policy_role: str):
+    """Return the callable that maps an observation TensorDict to actions."""
+    if policy_role == "teacher":
+        act_teacher = getattr(policy, "act_teacher", None)
+        if act_teacher is None:
+            raise ValueError(
+                "--policy_role teacher requires a teacher-student policy; this checkpoint's "
+                f"policy class {type(policy).__name__} has no act_teacher()."
+            )
+        return lambda obs: act_teacher(obs, stochastic_output=False)
+    return policy
+
+
+def main() -> None:
+    env_cfg = parse_env_cfg(task_name=args_cli.task, device=args_cli.device, num_envs=args_cli.num_envs)
+    agent_cfg = cli_args.parse_rsl_rl_cfg(args_cli.task, args_cli)
+
+    log_root_path = os.path.abspath(os.path.join("logs", "rsl_rl", agent_cfg.experiment_name))
+    resume_path = args_cli.checkpoint_path or get_checkpoint_path(
+        log_root_path, agent_cfg.load_run, agent_cfg.load_checkpoint
     )
-    agent_cfg: RslRlPpoAlgorithmMlpCfg = cli_args.parse_rsl_rl_cfg(args_cli.task, args_cli)
 
-    env_cfg.seed = agent_cfg.seed
-
-    # specify directory for logging experiments
-    if args_cli.checkpoint_path is None:
-        log_root_path = os.path.join("logs", "rsl_rl", agent_cfg.experiment_name)
-        log_root_path = os.path.abspath(log_root_path)
-        print(f"[INFO] Loading experiment from directory: {log_root_path}")
-        resume_path = get_checkpoint_path(log_root_path, agent_cfg.load_run, agent_cfg.load_checkpoint)
-    else:
-        resume_path = args_cli.checkpoint_path
-    log_dir = os.path.dirname(resume_path)
-
-    # create isaac environment
     env = gym.make(args_cli.task, cfg=env_cfg, render_mode="rgb_array" if args_cli.video else None)
-
     if args_cli.video:
-        video_kwargs = {
-            "video_folder": os.path.join(log_dir, "videos", "play"),
-            "step_trigger": lambda step: step == 0,
-            "video_length": args_cli.video_length,
-            "disable_logger": True,
-        }
-        print("[INFO] Recording videos during training.")
-        print_dict(video_kwargs, nesting=4)
-        env = gym.wrappers.RecordVideo(env, **video_kwargs)
-
-    # convert to single-agent instance if required by the RL algorithm
-    if isinstance(env.unwrapped, DirectMARLEnv):
-        env = multi_agent_to_single_agent(env)
-
-    # wrap around environment for rsl-rl
-    env = RslRlVecEnvWrapper(env)
-    # load previously trained model
-    print(f"[INFO]: Loading model checkpoint from: {resume_path}")
-    ppo_runner = OnPolicyRunner(env, agent_cfg.to_dict(), log_dir=None, device=agent_cfg.device)
-    ppo_runner.load(resume_path)
-
-    # obtain the trained policy for inference
-    policy = ppo_runner.get_inference_policy(device=env.unwrapped.device)
-    encoder = ppo_runner.get_inference_encoder(device=env.unwrapped.device)
-
-    # export policy to onnx
-    if EXPORT_POLICY:
-        export_model_dir = os.path.join(os.path.dirname(resume_path), "exported")
-        export_policy_as_jit(
-            ppo_runner.alg.actor_critic, export_model_dir
+        env = gym.wrappers.RecordVideo(
+            env,
+            video_folder=os.path.join(os.path.dirname(resume_path), "videos", "play"),
+            step_trigger=lambda step: step == 0,
+            video_length=args_cli.video_length,
+            disable_logger=True,
         )
-        print("Exported policy as jit script to: ", export_model_dir)
-        export_mlp_as_onnx(
-            ppo_runner.alg.actor_critic.actor, 
-            export_model_dir, 
-            "policy",
-            ppo_runner.alg.actor_critic.num_actor_obs,
-        )
-        export_mlp_as_onnx(
-            ppo_runner.alg.encoder,
-            export_model_dir,
-            "encoder",
-            ppo_runner.alg.encoder.num_input_dim,
-        )
-    # reset environment
-    obs_dict = env.get_observations()
-    obs = obs_dict["policy"]
-    obs_history = obs_dict.get("obsHistory")
-    obs_history = obs_history.flatten(start_dim=1)
-    commands = obs_dict.get("commands") 
- 
-    # simulate environment
+    env = WheeledLeggedRslRlVecEnvWrapper(env, clip_actions=agent_cfg.clip_actions)
+
+    runner = WheeledLeggedVelocityOnPolicyRunner(
+        env, dataclasses.asdict(agent_cfg), log_dir=None, device=args_cli.device
+    )
+    print(f"[INFO] Loading model checkpoint from: {resume_path}")
+    runner.load(resume_path)
+
+    if args_cli.export_onnx:
+        export_dir = os.path.join(os.path.dirname(resume_path), "exported")
+        runner.export_policy_to_onnx(export_dir, "policy.onnx")
+        print(f"[INFO] Exported ONNX policy to: {export_dir}")
+        env.close()
+        return
+
+    policy = _select_policy(runner.get_inference_policy(device=env.unwrapped.device), args_cli.policy_role)
+
+    obs = env.get_observations()
+    step = 0
     while simulation_app.is_running():
-        # run everything in inference mode
         with torch.inference_mode():
-            # agent stepping
-            est = encoder(obs_history)
-            actions = policy(torch.cat((est, obs, commands), dim=-1).detach())
-            # env stepping
-            obs_dict, _, _, infos = env.step(actions)
-            obs = obs_dict["policy"]
-            obs_history = obs_dict.get("obsHistory")
-            obs_history = obs_history.flatten(start_dim=1)
-            commands = obs_dict.get("commands") 
+            actions = policy(obs)
+            obs, _, _, _ = env.step(actions)
+        step += 1
+        if args_cli.steps is not None and step >= args_cli.steps:
+            break
 
-    # close the simulator
     env.close()
 
 
 if __name__ == "__main__":
-    EXPORT_POLICY = True
-    # run the main execution
     main()
-    # close sim app
     simulation_app.close()

@@ -181,10 +181,34 @@ python scripts/rsl_rl/train.py --task Isaac-Limx-SF-TRON2A-Blind-Flat-v0 --resum
 
 ## Robot morphology
 
-| Morphology | End-effector | task id prefix |
-|---|---|---|
-| SF_TRON2A | sole foot (ankle pitch) | `Isaac-Limx-SF-TRON2A-...` |
-| WF_TRON2A | wheel | `Isaac-Limx-WF-TRON2A-...` |
+| Morphology | End-effector | Actuation | task id prefix |
+|---|---|---|---|
+| WF_TRON1B | wheel | position-controlled legs + velocity-controlled wheels | `Isaac-Limx-WF-TRON1B-...` |
+| SF_TRON2A | sole foot (ankle pitch) | position-controlled | *(assets only — tasks removed)* |
+| WF_TRON2A | wheel | position-controlled | *(assets only — tasks removed)* |
+
+### Registered tasks
+
+| Task ID | Terrain |
+|---|---|
+| `Isaac-Limx-WF-TRON1B-Velocity-Flat-v0` / `-Play-v0` | plane |
+| `Isaac-Limx-WF-TRON1B-Velocity-Rough-v0` / `-Play-v0` | generated (stairs, slopes, obstacles, random rough) |
+
+```bash
+# Train
+python scripts/rsl_rl/train.py --task Isaac-Limx-WF-TRON1B-Velocity-Flat-v0 --num_envs 4096 --headless
+
+# Play a checkpoint
+python scripts/rsl_rl/play.py --task Isaac-Limx-WF-TRON1B-Velocity-Flat-Play-v0 \
+    --num_envs 32 --checkpoint_path <model.pt>
+
+# One-off: generate the USD from the shipped MJCF
+python scripts/tools/convert_wf_tron1b_mjcf.py --headless
+```
+
+The TRON2A task configurations were removed when the vendored `rsl_rl` was
+re-synced from `v2.0.1` to `v5.3.0`; they were written against the old runner
+API. Their USD and STL assets are retained. See `CHANGELOG.md`.
 
 ## Architecture overview
 

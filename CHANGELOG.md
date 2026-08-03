@@ -7,6 +7,115 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — WF-TRON1B velocity tasks (ported from the mjlab task package)
+
+- **WF-TRON1B wheeled biped**, a position-actuated-leg / velocity-actuated-wheel
+  robot. MJCF and STL meshes under
+  `exts/bipedal_locomotion/bipedal_locomotion/assets/mjcf/WF_TRON1B/`, articulation
+  config at `assets/config/wheelfoot_tron1b_cfg.py`. USD is generated, not
+  committed by hand: run `scripts/tools/convert_wf_tron1b_mjcf.py`, which also
+  audits joint/body names and records the resolved joint order.
+- **Four task registrations**: `Isaac-Limx-WF-TRON1B-Velocity-{Flat,Rough}-v0`
+  and their `-Play-v0` twins. Both entry points are registered as
+  `"module:ClassName"` strings so a task and its play twin get independent config
+  instances (previously they shared one mutable runner-cfg object).
+- **Rough terrain and a terrain-level curriculum** — the repository previously had
+  neither. `cfg/WF_TRON1B/terrain_cfg.py` interleaves flat columns between the
+  obstacle columns so a straight-line command crosses terrain *transitions*.
+- **Height-scan ray-casters and per-wheel contact sensors.** `height_scanner` was
+  previously declared `MISSING` and nulled by every task; there is now a concrete
+  base scan plus two per-wheel scans.
+- **Terrain-roughness gate** (`mdp/kernels.py`) arbitrating wheeled versus legged
+  motion, driving six rough-terrain reward terms, with a threshold that ramps over
+  training.
+- **Per-environment actuation delay at the action-term level**
+  (`mdp/wheeled_actions.py`), with a shared delay group so legs and wheels cannot
+  desynchronise, 5 s resampling independent of episode boundaries, and encoder-bias
+  subtraction on the commanded target. Exposes `applied_action`, which the
+  latent-dynamics variants require and which a delayed *actuator* cannot provide.
+- **World-frame velocity command** (`mdp/commands/wheeled_velocity_command.py`).
+  Isaac Lab's stock command is body-frame, which a robot can satisfy while
+  continuously turning.
+- **Domain-randomisation state that is readable back** as a privileged observation
+  (`mdp/domain_randomization.py`, `mdp/wheeled_events.py`): wheel friction, joint
+  encoder bias and base COM offset.
+- **`tests/`**, 116 assertions that run without Isaac Sim. Includes
+  `test_parity_with_mjlab.py`, which transcribes the mjlab reference
+  implementations verbatim and asserts the ported kernels agree numerically.
+- `scripts/tools/smoke_rollout.py`: random-action rollout asserting observation
+  group widths, finite observations, and that a robot in contact actually reports
+  contact.
+
+### Changed
+
+- **Vendored `rsl_rl/` re-synced from `v2.0.1` to `v5.3.0`** as a wholesale
+  replacement (the two tags share no mergeable structure). Brings the
+  teacher-student representation models and algorithms the `-RepTS` family needs.
+  Upstream plural directory names (`algorithms/`, `runners/`) are restored. See
+  `rsl_rl/CHANGES_VS_UPSTREAM.md`; `THIRD_PARTY_NOTICES.md` §2 and §3 updated.
+  New runtime dependencies: `tensordict>=0.7`, `onnxscript>=0.5.4`, `torch>=2.6`.
+- `scripts/rsl_rl/{train,play,cli_args}.py` rewritten for the 5.3.0 API
+  (TensorDict observation groups, `obs_groups` wiring). `play.py` gains
+  `--policy_role student|teacher`, `--export_onnx` and `--steps`; ONNX export is
+  no longer gated on a hard-coded module global.
+- `bipedal_locomotion.utils.wrappers.rsl_rl` no longer re-exports
+  `isaaclab_rl.rsl_rl`. Its config dataclasses target a different `rsl-rl-lib`
+  and silently mismatch the vendored fork.
+- Fixed `ruff check --select F exts scripts`, which was failing at HEAD with 40
+  errors despite being declared CI-blocking. Includes a genuine latent bug:
+  `mdp/events.py::action_out_of_limits` annotated an undefined
+  `ManagerBasedRLEnv`.
+
+### Fixed — found by reviewing the port against the Isaac Lab v2.3.1 sources
+
+- **Wheel height scans were base-aligned instead of world-aligned.** The deprecated
+  `attach_yaw_only=False` maps to `ray_alignment="base"`, not `"world"`. Base-aligned
+  rays tilt with the robot, so a leaning robot would read a longer distance to the
+  ground and the clearance reward would score it as having lifted the wheel. Both
+  scan configs now set `ray_alignment` explicitly.
+- **PhysX material properties are indexed by collision shape, not by body.** The
+  friction randomisation wrote using body indices; on this robot `knee_*_Link` carries
+  two collision geoms, so every body after it was offset and the wrong link's friction
+  was randomised while a different value was recorded as privileged observation. Now
+  maps body → shape range via `num_shapes_per_body`.
+- **Delayed action terms replayed the previous episode's final target after a reset.**
+  `JointAction.reset()` zeroes `raw_actions` but leaves `processed_actions` stale, and
+  the delay FIFO was being primed from the stale value. Processed actions are now
+  recomputed before the FIFO is filled.
+- **`standing_forward_wheel_air_time` used the wrong airborne test.** Now
+  `current_air_time > 0.0`, which is the definition both simulators' own
+  `compute_first_contact` uses.
+- **A zero-weight diagnostic reward term would never have run.** Both RewardManagers
+  skip `weight == 0.0` terms outright, so the ported `mean_action_acc` metric was dead
+  code; it is removed rather than left looking wired up.
+- **The terrain-normal fit used the wrong estimator and included missed rays.** The
+  `upright` reward measures tilt against the terrain surface on rough ground. The port
+  had substituted a least-squares `z = ax + by + c` regression, which cannot represent
+  a plane steeper than vertical and is ill-conditioned well before that — precisely on
+  the stairs and slopes where the term matters — and it passed rays that hit nothing
+  through `nan_to_num`, placing them at the world origin as extreme outliers. Now a
+  faithful port of the reference: masked covariance eigendecomposition with
+  eigenvalue-ratio degeneracy detection, upward orientation, and per-sensor
+  subsampling. Covered by new parity tests against the reference implementation.
+
+### Removed
+
+- **TRON2A tasks deregistered.** `Isaac-Limx-{SF,WF}-TRON2A-Blind-Flat-v0` and
+  their play twins, their env cfgs (`cfg/{SF,WF}_TRON2A/`,
+  `robots/limx_*_tron2a_env_cfg.py`), their agent cfg and the `rl_mlp_cfg.py`
+  wrapper are gone: they are written against the `v2.0.1` runner API and cannot
+  run under the re-synced fork. **The USD and STL assets under
+  `assets/usd/{SF,WF}_TRON2A/` are retained** — they are the only artifacts in
+  this repository that cannot be regenerated from it.
+- Two mjlab terms were deliberately **not** ported, both verified dead or
+  simulator-specific:
+  - `prepare_quantities` — its four outputs have no readers anywhere in the mjlab
+    task package.
+  - `clear_non_finite_sim_data` — a MuJoCo-Warp workaround for stale
+    `qacc_warmstart` after a partial reset. Isaac Lab's `_reset_idx` writes clean
+    state and `ContactSensor.reset` clears history. The `non_finite_physics`
+    *termination*, which is what actually guards against divergence, is ported.
+
 ### Added
 - Open-source scaffolding: `NOTICE`, `THIRD_PARTY_NOTICES.md`,
   `SECURITY.md`, `CONTRIBUTING.md`, `CHANGELOG.md`.

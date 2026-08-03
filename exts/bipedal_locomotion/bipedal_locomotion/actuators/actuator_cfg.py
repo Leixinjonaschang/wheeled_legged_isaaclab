@@ -3,11 +3,6 @@
 #
 # SPDX-License-Identifier: BSD-3-Clause
 
-import torch
-from collections.abc import Iterable
-from dataclasses import MISSING
-from typing import Literal
-
 from isaaclab.actuators import ImplicitActuatorCfg
 from isaaclab.utils import configclass
 

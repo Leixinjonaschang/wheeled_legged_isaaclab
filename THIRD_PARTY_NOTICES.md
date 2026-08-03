@@ -46,27 +46,34 @@ Owner action required (RL owner + legal):
 ## 2. `rsl_rl/` — vendored fork of leggedrobotics/rsl_rl
 
 - **Path:** `rsl_rl/`
-- **Declared license:** **BSD-3-Clause**, per `rsl_rl/setup.py:1-2`:
+- **Declared license:** **BSD-3-Clause**, per `rsl_rl/setup.py:1-4`:
 
   ```
-  #  Copyright 2021 ETH Zurich, NVIDIA CORPORATION
-  #  SPDX-License-Identifier: BSD-3-Clause
+  # Copyright (c) 2021-2026, ETH Zurich and NVIDIA CORPORATION
+  # All rights reserved.
+  #
+  # SPDX-License-Identifier: BSD-3-Clause
   ```
 
 - **Upstream:** <https://github.com/leggedrobotics/rsl_rl>
 - **Nature:** vendored fork (see `README.md:10`). The tree here is
   edited and shipped in-tree; `scripts/rsl_rl/*.py` imports the local
   copy in preference to any pip-installed `rsl_rl`.
-- **Upstream tag / commit:** **`v2.0.1`** — commit
-  `73fd7c621bf63104a8a7eb0c168df16c0ee65908` — as recorded in
+- **Upstream tag / commit:** **`v5.3.0`** — upstream commit SHA is
+  `⚠ TO CONFIRM`; see "Provenance of the 5.3.0 re-sync" in
   [`rsl_rl/CHANGES_VS_UPSTREAM.md`](rsl_rl/CHANGES_VS_UPSTREAM.md).
+  The base tag is attested by `rsl_rl/pyproject.toml` and
+  `rsl_rl/CITATION.cff`; the vendored version string carries the local
+  suffix `5.3.0+limx.1`.
 - **Diff versus upstream:** ✅ recorded in
   [`rsl_rl/CHANGES_VS_UPSTREAM.md`](rsl_rl/CHANGES_VS_UPSTREAM.md).
-  Summary: directory renames (`algorithms/` → `algorithm/`, `runners/`
-  → `runner/`); files removed (`utils/`, `actor_critic_recurrent.py`,
-  `normalizer.py`); one file added by LimX (`mlp_encoder.py`); the
-  `ppo.py` and `on_policy_runner.py` edits are the largest content
-  changes.
+  Summary: the fork was re-synced from `v2.0.1` to `v5.3.0` in 2026-07
+  as a wholesale replacement (the two tags share no mergeable
+  structure). The upstream plural directory names (`algorithms/`,
+  `runners/`) are restored. LimX adds four teacher-student
+  representation models under `models/` and three matching algorithms
+  under `algorithms/`, plus an optional `applied_actions` buffer in
+  `storage/rollout_storage.py`.
 - **Attribution requirement (BSD-3-Clause):** the top-level `NOTICE`
   file, this section, and each source file's header must retain the
   ETH Zurich / NVIDIA copyright notice, the license text, and the
@@ -85,19 +92,35 @@ invoked at commit time. A per-file classification with an update
 procedure lives at
 [`rsl_rl/licenses/dependencies/README.md`](rsl_rl/licenses/dependencies/README.md).
 
+The inventory below reflects the `v5.3.0` re-sync (2026-07). It replaced
+the previous 12-file `v2.0.1` set: `black`, `flake8`, `isort` and
+`pyupgrade` were dropped upstream in favour of `ruff`, and
+`numpy_license.txt` / `torch_license.txt` were renamed to the hyphenated
+form.
+
 | File | Tool | License text kind | Status |
 |------|------|-------------------|--------|
-| `black-license.txt` | Black formatter | MIT | ✅ compatible |
 | `codespell-license.txt` | codespell | **GPL-2.0** text | ✅ classified as **dev-only** — see below |
-| `flake8-license.txt` | flake8 | MIT | ✅ compatible |
-| `isort-license.txt` | isort | MIT | ✅ compatible |
-| `numpy_license.txt` | NumPy | BSD-3-Clause | ✅ compatible (runtime) |
+| `furo-license.txt` | Furo (Sphinx theme) | MIT | ✅ compatible (docs-only) |
+| `gitpython-license.txt` | GitPython | BSD-3-Clause | ✅ compatible (runtime) |
+| `numpy-license.txt` | NumPy | BSD-3-Clause | ✅ compatible (runtime) |
 | `onnx-license.txt` | ONNX | Apache-2.0 | ✅ compatible (runtime) |
+| `onnxscript-license.txt` | ONNX Script | MIT | ✅ compatible (runtime) |
 | `pre-commit-hooks-license.txt` | pre-commit-hooks | MIT | ✅ compatible |
 | `pre-commit-license.txt` | pre-commit | MIT | ✅ compatible |
 | `pyright-license.txt` | Pyright | MIT | ✅ compatible |
-| `pyupgrade-license.txt` | pyupgrade | MIT | ✅ compatible |
-| `torch_license.txt` | PyTorch | BSD-style | ✅ compatible (runtime) |
+| `ruff-license.txt` | Ruff | MIT | ✅ compatible |
+| `setuptools-license.txt` | setuptools | MIT | ✅ compatible (build) |
+| `sphinx-license.txt` | Sphinx | BSD-2-Clause | ✅ compatible (docs-only) |
+| `tensordict-license.txt` | tensordict | MIT | ✅ compatible (runtime) |
+| `torch-license.txt` | PyTorch | BSD-style | ✅ compatible (runtime) |
+| `torchvision-license.txt` | torchvision | BSD-3-Clause | ✅ compatible (runtime) |
+
+> `tensordict`, `onnxscript`, `gitpython`, `torchvision` and `onnx` are
+> **runtime** dependencies of the vendored `rsl_rl` at `v5.3.0`, not dev
+> tooling. They are listed here because upstream keeps their license
+> texts in this directory; the section heading's "dev-tooling" framing
+> predates the re-sync.
 
 **`codespell-license.txt` (GPL-2.0) — classified dev-only (2026-07-14).**
 `codespell` is a pre-commit spell checker; nothing under `rsl_rl/` or
@@ -144,7 +167,23 @@ records in its `ASSETS.md`.
 | `exts/bipedal_locomotion/bipedal_locomotion/assets/usd/WF_TRON2A/usd/*.usd` (incl. `configuration/`) | — | 5 |
 | `exts/bipedal_locomotion/bipedal_locomotion/assets/usd/SF_TRON2A/meshes/*.STL` | 11 | — |
 | `exts/bipedal_locomotion/bipedal_locomotion/assets/usd/SF_TRON2A/usd/*.usd` (incl. `configuration/`) | — | 5 |
-| **Total** | **22** | **10** |
+| `exts/bipedal_locomotion/bipedal_locomotion/assets/mjcf/WF_TRON1B/meshes/*.STL` | 9 | — |
+| `exts/bipedal_locomotion/bipedal_locomotion/assets/mjcf/WF_TRON1B/xml/robot.xml` | — | — |
+| **Total** | **31** | **10** |
+
+**WF_TRON1B (added 2026-07).** Shipped as **MJCF + STL only**. The USD is
+*generated* from that MJCF by
+`scripts/tools/convert_wf_tron1b_mjcf.py` and is a build product, not a
+separately authored asset — its provenance is exactly that of the MJCF and
+meshes above. The STL headers were checked at import time: all 9 are binary
+with zeroed 80-byte headers, so requirement 2 below is already satisfied for
+this variant. `robot.xml` is a text file and contains no CAD provenance beyond
+mesh file names.
+
+The TRON2A task configurations were removed in the same change (see
+`CHANGELOG.md`), but the TRON2A **assets are retained** because they cannot be
+regenerated from this repository. If the owner sign-off below concludes they
+should not ship without a consuming task, they can be deleted independently.
 
 > The open-source review that seeded this scaffolding referenced the
 > lower figure of "10 STL / USD assets" because it was performed

@@ -1,68 +1,65 @@
+"""Gym registrations for every locomotion task in this extension.
+
+Both entry points are registered as ``"module.path:ClassName"`` strings rather
+than as pre-built objects. ``load_cfg_from_registry`` then instantiates a fresh
+config per ``gym.make``, so a task and its ``-Play-v0`` twin cannot mutate each
+other's configuration -- which they did when the runner cfg was shared as a
+single module-level instance.
+"""
+
 import gymnasium as gym
 
-from bipedal_locomotion.tasks.locomotion.agents.limx_rsl_rl_ppo_cfg import (
-    SF_TRON2AFlatPPORunnerCfg, WF_TRON2AFlatPPORunnerCfg,
-)
+from bipedal_locomotion.tasks.locomotion import agents
 
-from . import limx_solefoot_tron2a_env_cfg, limx_wheelfoot_tron2a_env_cfg
+from . import wf_tron1b_env_cfg  # noqa: F401  (imported for side-effect-free discoverability)
 
-##
-# Create PPO runners for RSL-RL
-##
-
-limx_sf_tron2a_blind_flat_runner_cfg = SF_TRON2AFlatPPORunnerCfg()
-
-limx_wf_tron2a_blind_flat_runner_cfg = WF_TRON2AFlatPPORunnerCfg()
-
+_ENV_CFG = wf_tron1b_env_cfg.__name__
+_AGENTS = agents.__name__
 
 ##
-# Register Gym environments
+# WF-TRON1B velocity tracking -- flat terrain
 ##
 
-
-######################################
-# SF_TRON2A Blind Flat Environment
-######################################
 gym.register(
-    id="Isaac-Limx-SF-TRON2A-Blind-Flat-v0",
+    id="Isaac-Limx-WF-TRON1B-Velocity-Flat-v0",
     entry_point="isaaclab.envs:ManagerBasedRLEnv",
     disable_env_checker=True,
     kwargs={
-        "env_cfg_entry_point": limx_solefoot_tron2a_env_cfg.SF_TRON2A_BlindFlatEnvCfg,
-        "rsl_rl_cfg_entry_point": limx_sf_tron2a_blind_flat_runner_cfg,
+        "env_cfg_entry_point": f"{_ENV_CFG}:WF_TRON1B_FlatEnvCfg",
+        "rsl_rl_cfg_entry_point": f"{_AGENTS}:WFTron1BPPORunnerCfg",
     },
 )
 
 gym.register(
-    id="Isaac-Limx-SF-TRON2A-Blind-Flat-Play-v0",
+    id="Isaac-Limx-WF-TRON1B-Velocity-Flat-Play-v0",
     entry_point="isaaclab.envs:ManagerBasedRLEnv",
     disable_env_checker=True,
     kwargs={
-        "env_cfg_entry_point": limx_solefoot_tron2a_env_cfg.SF_TRON2A_BlindFlatEnvCfg_PLAY,
-        "rsl_rl_cfg_entry_point": limx_sf_tron2a_blind_flat_runner_cfg,
+        "env_cfg_entry_point": f"{_ENV_CFG}:WF_TRON1B_FlatEnvCfg_PLAY",
+        "rsl_rl_cfg_entry_point": f"{_AGENTS}:WFTron1BPPORunnerCfg",
     },
 )
 
+##
+# WF-TRON1B velocity tracking -- generated rough terrain
+##
 
-######################################
-# WF_TRON2A Blind Flat Environment
-######################################
 gym.register(
-    id="Isaac-Limx-WF-TRON2A-Blind-Flat-v0",
+    id="Isaac-Limx-WF-TRON1B-Velocity-Rough-v0",
     entry_point="isaaclab.envs:ManagerBasedRLEnv",
     disable_env_checker=True,
     kwargs={
-        "env_cfg_entry_point": limx_wheelfoot_tron2a_env_cfg.WF_TRON2A_BlindFlatEnvCfg,
-        "rsl_rl_cfg_entry_point": limx_wf_tron2a_blind_flat_runner_cfg,
+        "env_cfg_entry_point": f"{_ENV_CFG}:WF_TRON1B_RoughEnvCfg",
+        "rsl_rl_cfg_entry_point": f"{_AGENTS}:WFTron1BPPORunnerCfg",
     },
 )
 
 gym.register(
-    id="Isaac-Limx-WF-TRON2A-Blind-Flat-Play-v0",
+    id="Isaac-Limx-WF-TRON1B-Velocity-Rough-Play-v0",
     entry_point="isaaclab.envs:ManagerBasedRLEnv",
     disable_env_checker=True,
     kwargs={
-        "env_cfg_entry_point": limx_wheelfoot_tron2a_env_cfg.WF_TRON2A_BlindFlatEnvCfg_PLAY,
-        "rsl_rl_cfg_entry_point": limx_wf_tron2a_blind_flat_runner_cfg,
+        "env_cfg_entry_point": f"{_ENV_CFG}:WF_TRON1B_RoughEnvCfg_PLAY",
+        "rsl_rl_cfg_entry_point": f"{_AGENTS}:WFTron1BPPORunnerCfg",
     },
 )

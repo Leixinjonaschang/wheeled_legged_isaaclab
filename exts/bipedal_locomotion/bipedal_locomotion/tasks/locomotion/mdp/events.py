@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import torch
-from typing import TYPE_CHECKING, Literal
+from typing import Literal
 
 import isaaclab.utils.math as math_utils
 from isaaclab.assets import Articulation, RigidObject
-from isaaclab.envs import ManagerBasedEnv
+from isaaclab.envs import ManagerBasedEnv, ManagerBasedRLEnv
 from isaaclab.managers import SceneEntityCfg
 
 def prepare_quantity_for_tron(
@@ -14,7 +14,7 @@ def prepare_quantity_for_tron(
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
     foot_radius = 0.127,
 ):
-    asset: Articulation = env.scene[asset_cfg.name]
+    del asset_cfg, env_ids  # kept for signature compatibility with the event manager
     env._foot_radius = foot_radius
 
 def apply_external_force_torque_stochastic(

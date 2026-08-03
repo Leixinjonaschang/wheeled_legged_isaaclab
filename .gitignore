@@ -69,3 +69,9 @@ dist/
 htmlcov/
 .coverage
 .coverage.*
+
+# Virtualenvs. `uv run` creates .venv/ in the project root, and site-packages
+# contains *.pth files that would otherwise trip the training-artifact deny-list.
+.venv/
+venv/
+env/
