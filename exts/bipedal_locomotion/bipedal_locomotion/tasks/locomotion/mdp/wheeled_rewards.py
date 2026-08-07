@@ -40,7 +40,7 @@ from .kernels import (
     wheel_lateral_symmetry,
     wheel_x_alignment,
 )
-from .sensor_utils import hit_points_with_mask, stack_clearance_samples
+from .sensor_utils import contact_state, hit_points_with_mask, stack_clearance_samples
 
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
@@ -543,14 +543,11 @@ class WheelAirTimeBalance(ManagerTermBase):
         sensor_cfg: SceneEntityCfg,
         min_total_air_time: float = 1.0,
         balance_tolerance: float = 0.2,
-        force_threshold: float = 1.0,
     ) -> torch.Tensor:
-        sensor = env.scene[sensor_cfg.name]
-        forces = sensor.data.net_forces_w[:, sensor_cfg.body_ids]
-        if forces.shape[1] != 2:
-            raise ValueError(f"WheelAirTimeBalance expects exactly two wheel bodies, got {forces.shape[1]}")
-        in_air = (torch.norm(forces, dim=-1) <= force_threshold).float()
-        self._cumulative_air_time += in_air * env.step_dt
+        in_contact = contact_state(env, sensor_cfg)
+        if in_contact.shape[1] != 2:
+            raise ValueError(f"WheelAirTimeBalance expects exactly two wheel bodies, got {in_contact.shape[1]}")
+        self._cumulative_air_time += (~in_contact).float() * env.step_dt
 
         cost = air_time_balance_cost(self._cumulative_air_time, min_total_air_time, balance_tolerance)
 
@@ -624,7 +621,6 @@ def rough_wheel_foot_clearance(
     target_std: float = 0.04,
     command_threshold: float = 0.05,
     max_distance: float = 1.0,
-    force_threshold: float = 1.0,
 ) -> torch.Tensor:
     """Reward lifting a swinging wheel to a clearance that suits the local terrain.
 
@@ -653,9 +649,7 @@ def rough_wheel_foot_clearance(
     wheel_centre_clearance = samples.amin(dim=-1)
     wheel_foot_clearance = torch.clamp(wheel_centre_clearance - wheel_radius, min=0.0)
 
-    contact_sensor = env.scene[contact_sensor_cfg.name]
-    forces = contact_sensor.data.net_forces_w[:, contact_sensor_cfg.body_ids]
-    in_air = (torch.norm(forces, dim=-1) <= force_threshold).float()
+    in_air = (~contact_state(env, contact_sensor_cfg)).float()
     active = _command_active(env, command_name, command_threshold)
 
     target = torch.clamp(base_target_height + range_scale * local_height_range, max=max_target_height)
@@ -680,7 +674,6 @@ def rough_contact_pattern(
     roughness_gate_threshold_ramp_steps: int = 0,
     grid_shape: tuple[int, int] | None = None,
     command_threshold: float = 0.05,
-    force_threshold: float = 1.0,
 ) -> torch.Tensor:
     """Push toward single support on rough ground by penalising the two static patterns.
 
@@ -699,9 +692,7 @@ def rough_contact_pattern(
         roughness_gate_threshold_final,
         roughness_gate_threshold_ramp_steps,
     )
-    sensor = env.scene[contact_sensor_cfg.name]
-    forces = sensor.data.net_forces_w[:, contact_sensor_cfg.body_ids]
-    in_contact = torch.norm(forces, dim=-1) > force_threshold
+    in_contact = contact_state(env, contact_sensor_cfg)
     contact_count = torch.sum(in_contact.float(), dim=1)
     num_contacts = in_contact.shape[1]
 

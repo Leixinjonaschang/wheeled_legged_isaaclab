@@ -16,7 +16,7 @@ from isaaclab.managers import SceneEntityCfg
 
 from .domain_randomization import get_dr_state
 from .kernels import encode_contact_forces, normalize_to_unit_range, terrain_roughness_from_height_samples
-from .sensor_utils import stack_clearance_samples
+from .sensor_utils import contact_state, stack_clearance_samples
 
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
@@ -48,20 +48,14 @@ def base_link_lin_vel(
     return asset.data.root_link_lin_vel_b
 
 
-def wheel_contact(
-    env: ManagerBasedRLEnv,
-    sensor_cfg: SceneEntityCfg,
-    threshold: float = 1.0,
-) -> torch.Tensor:
-    """1.0 per wheel body currently in contact with anything. Shape ``[B, num_wheels]``.
+def wheel_contact(env: ManagerBasedRLEnv, sensor_cfg: SceneEntityCfg) -> torch.Tensor:
+    """1.0 per wheel body currently in contact. Shape ``[B, num_wheels]``.
 
     Uses the net contact force rather than a ground-filtered force matrix. On this task
     the wheels only ever touch the terrain, so the two agree, and the net force avoids
     depending on filtered contact reporting working against instanced terrain meshes.
     """
-    sensor = env.scene[sensor_cfg.name]
-    forces = sensor.data.net_forces_w[:, sensor_cfg.body_ids]  # [B, N, 3]
-    return (torch.norm(forces, dim=-1) > threshold).float()
+    return contact_state(env, sensor_cfg).float()
 
 
 def wheel_contact_forces(

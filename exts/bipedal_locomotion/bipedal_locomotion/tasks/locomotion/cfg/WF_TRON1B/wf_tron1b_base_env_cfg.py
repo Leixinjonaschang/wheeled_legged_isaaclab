@@ -143,6 +143,7 @@ class WF_TRON1B_SceneCfg(InteractiveSceneCfg):
         prim_path="{ENV_REGEX_NS}/Robot/wheel_.*_Link",
         history_length=0,
         track_air_time=True,
+        force_threshold=C.CONTACT_FORCE_THRESHOLD,
         update_period=0.0,
     )
     illegal_contact_forces = ContactSensorCfg(
@@ -478,7 +479,7 @@ class RewardsCfg:
     illegal_ground_contact = RewTerm(
         func=mdp.contact_force_cost,
         weight=-1.0,
-        params={"sensor_cfg": _ILLEGAL_CONTACTS, "force_threshold": 10.0},
+        params={"sensor_cfg": _ILLEGAL_CONTACTS, "force_threshold": C.ILLEGAL_CONTACT_FORCE_THRESHOLD},
     )
     soft_landing = RewTerm(
         func=mdp.soft_landing,
@@ -558,7 +559,7 @@ class TerminationsCfg:
     )
     illegal_contact = DoneTerm(
         func=mdp.illegal_contact,
-        params={"sensor_cfg": _ILLEGAL_CONTACTS, "threshold": 10.0},
+        params={"sensor_cfg": _ILLEGAL_CONTACTS, "threshold": C.ILLEGAL_CONTACT_FORCE_THRESHOLD},
     )
     # Leaving the terrain is not a failure, so it truncates rather than terminates.
     out_of_terrain_bounds = DoneTerm(func=mdp.out_of_terrain_bounds, params={"margin": 0.05}, time_out=True)

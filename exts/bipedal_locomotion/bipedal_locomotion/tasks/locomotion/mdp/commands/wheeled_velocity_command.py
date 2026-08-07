@@ -133,9 +133,16 @@ class WheeledUniformVelocityCommand(CommandTerm):
             init_mask = r.uniform_(0.0, 1.0) < self.cfg.init_velocity_prob
             init_ids = env_ids[init_mask]
             if len(init_ids) > 0:
+                # `root_state_w` is [pos(0:3), quat(3:7), lin_vel_w(7:10), ang_vel_w(10:13)]
+                # -- both velocities are world-frame here, unlike the mjlab layout this was
+                # ported from, where the angular velocity slot is body-frame. The yaw-rate
+                # command is a world-frame quantity (it is derived from world heading
+                # error), so it goes in unchanged; `vel_command_w[:, 2]` is used rather
+                # than the numerically identical `vel_command_b[:, 2]` to keep the frames
+                # on both sides of the assignment obviously the same.
                 root_state = self.robot.data.root_state_w[init_ids].clone()
                 root_state[:, 7:9] = self.vel_command_w[init_ids, :2]
-                root_state[:, 12] = self.vel_command_b[init_ids, 2]
+                root_state[:, 12] = self.vel_command_w[init_ids, 2]
                 self.robot.write_root_state_to_sim(root_state, init_ids)
 
     def _update_command(self) -> None:

@@ -88,6 +88,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A zero-weight diagnostic reward term would never have run.** Both RewardManagers
   skip `weight == 0.0` terms outright, so the ported `mean_action_acc` metric was dead
   code; it is removed rather than left looking wired up.
+- **Contact detection had two independent thresholds that could silently disagree.**
+  The contact sensor uses its own `cfg.force_threshold` to maintain `current_air_time`,
+  while the ported reward terms each carried a hard-coded copy. The two happened to
+  match (both 1.0 N), so nothing was wrong today — but tuning one would have left some
+  terms calling a wheel airborne while others called it planted, with no error. All
+  contact-based terms now read the threshold off the sensor via a single
+  `sensor_utils.contact_state` helper, and the value is set explicitly from
+  `constants.py`.
 - **The terrain-normal fit used the wrong estimator and included missed rays.** The
   `upright` reward measures tilt against the terrain surface on rough ground. The port
   had substituted a least-squares `z = ax + by + c` regression, which cannot represent

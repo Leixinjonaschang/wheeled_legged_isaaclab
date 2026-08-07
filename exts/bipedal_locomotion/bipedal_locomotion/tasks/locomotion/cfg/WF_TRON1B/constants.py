@@ -75,6 +75,15 @@ WHEEL_HEIGHT_GRID_SHAPE = (5, 5)
 WHEEL_HEIGHT_MAX_DISTANCE = 1.0
 TERRAIN_SCAN_MAX_DISTANCE = 10.0
 
+# Force above which a body counts as in contact. Set explicitly on the wheel sensor
+# because it is the single definition of "on the ground": the sensor uses it to maintain
+# current_air_time, and every contact-based reward reads it back off the sensor rather
+# than carrying its own copy.
+CONTACT_FORCE_THRESHOLD = 1.0
+# Illegal contact is a different question -- "did this link take a real impact" -- so it
+# keeps its own, much higher threshold, shared by the penalty and the termination.
+ILLEGAL_CONTACT_FORCE_THRESHOLD = 10.0
+
 TERRAIN_SCAN_SENSOR = "terrain_scan"
 WHEEL_HEIGHT_SENSORS = ("wheel_height_scan_L", "wheel_height_scan_R")
 WHEEL_CONTACT_SENSOR = "wheel_contact_forces"

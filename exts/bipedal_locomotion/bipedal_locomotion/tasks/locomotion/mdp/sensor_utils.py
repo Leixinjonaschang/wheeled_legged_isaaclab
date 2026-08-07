@@ -20,7 +20,22 @@ from .kernels import heights_from_raycast
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
 
-__all__ = ["clearance_samples", "hit_points_with_mask", "stack_clearance_samples"]
+__all__ = ["clearance_samples", "contact_state", "hit_points_with_mask", "stack_clearance_samples"]
+
+
+def contact_state(env: ManagerBasedRLEnv, sensor_cfg) -> torch.Tensor:
+    """Boolean contact state for the selected bodies, shape ``[B, num_bodies]``.
+
+    Uses the sensor's own ``cfg.force_threshold`` rather than a per-term parameter. That
+    threshold is what the sensor already uses internally to maintain ``current_air_time``,
+    so reading it here keeps every contact-based term agreeing with the sensor's air-time
+    bookkeeping. Two independent thresholds would drift apart the moment one is tuned,
+    and the resulting disagreement -- one term calling a wheel airborne while another
+    calls it planted -- is invisible in the reward totals.
+    """
+    sensor = env.scene[sensor_cfg.name]
+    forces = sensor.data.net_forces_w[:, sensor_cfg.body_ids]
+    return torch.norm(forces, dim=-1) > sensor.cfg.force_threshold
 
 # Cached subsample indices, keyed by (total, max_points, device). Recomputing a linspace
 # every step for every environment shows up in the profile at 2048 environments.
