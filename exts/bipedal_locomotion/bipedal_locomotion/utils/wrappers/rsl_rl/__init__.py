@@ -12,10 +12,13 @@ inside ``construct_algorithm``.
 from .exporter import attach_metadata_to_onnx, get_wheeled_legged_metadata
 from .rl_cfg import (
     RslRlBaseRunnerCfg,
+    RslRlDepthRepresentationVelocityModelCfg,
+    RslRlDepthRepresentationVelocityPredictorModelCfg,
     RslRlModelCfg,
     RslRlOnPolicyRunnerCfg,
     RslRlPpoAlgorithmCfg,
     RslRlRepresentationVelocityModelCfg,
+    RslRlRepresentationVelocityPredictorTeacherStudentPpoAlgorithmCfg,
     RslRlRepresentationVelocityTeacherStudentPpoAlgorithmCfg,
 )
 from .runner import WheeledLeggedVelocityOnPolicyRunner
@@ -27,10 +30,13 @@ from .vecenv_wrapper import (
 
 __all__ = [
     "RslRlBaseRunnerCfg",
+    "RslRlDepthRepresentationVelocityModelCfg",
+    "RslRlDepthRepresentationVelocityPredictorModelCfg",
     "RslRlModelCfg",
     "RslRlOnPolicyRunnerCfg",
     "RslRlPpoAlgorithmCfg",
     "RslRlRepresentationVelocityModelCfg",
+    "RslRlRepresentationVelocityPredictorTeacherStudentPpoAlgorithmCfg",
     "RslRlRepresentationVelocityTeacherStudentPpoAlgorithmCfg",
     "RslRlVecEnvWrapper",
     "WheeledLeggedRslRlVecEnvWrapper",
