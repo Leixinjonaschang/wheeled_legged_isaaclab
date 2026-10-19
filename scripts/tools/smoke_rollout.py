@@ -8,8 +8,8 @@ still computes, the run still trains, and the resulting policy is shaped by a ro
 believes it is permanently airborne.
 
 Usage:
-    ${ISAACLAB}/isaaclab.sh -p scripts/tools/smoke_rollout.py \
-        --task Isaac-Limx-WF-TRON1B-Velocity-Flat-v0 --num_envs 16 --steps 100 --headless
+    python scripts/tools/smoke_rollout.py \
+        --task Isaac-Limx-WF-TRON1B-Velocity-Rough-RepTS-LinVel-BlindGP-v0 --num_envs 16 --steps 100 --headless
 """
 
 import argparse
@@ -25,12 +25,6 @@ parser = argparse.ArgumentParser(description="Random-action smoke rollout.")
 parser.add_argument("--task", type=str, required=True, help="Name of the task.")
 parser.add_argument("--num_envs", type=int, default=16, help="Number of environments.")
 parser.add_argument("--steps", type=int, default=100, help="Number of environment steps.")
-parser.add_argument(
-    "--expect-critic-dim",
-    type=int,
-    default=None,
-    help="Assert the critic group width (42 for flat, 166 for rough).",
-)
 AppLauncher.add_app_launcher_args(parser)
 args_cli = parser.parse_args()
 
@@ -47,10 +41,16 @@ from isaaclab_tasks.utils import parse_env_cfg
 import bipedal_locomotion  # noqa: F401  (importing registers the gym tasks)
 from bipedal_locomotion.utils.wrappers.rsl_rl import WheeledLeggedRslRlVecEnvWrapper
 
-# Widths the runner configs and the exported deployment metadata assume.
-EXPECTED_ACTOR_DIM = 31
-EXPECTED_DYNAMICS_CONTEXT_DIM = 87
-EXPECTED_HISTORY_LENGTH = 5
+# Observation shapes (per environment) the runner configs and the exported deployment metadata assume.
+EXPECTED_OBS_SHAPES = {
+    "proprio_history": (5, 28),
+    "actor_command": (3,),
+    "lin_vel_target": (3,),
+    "critic": (166,),
+    "privileged_encoder": (160,),
+    "wheel_roughness": (2,),
+    "dynamics_context": (87,),
+}
 EXPECTED_NUM_ACTIONS = 8
 
 
@@ -79,31 +79,11 @@ def main() -> int:
     for group, terms in env.unwrapped.observation_manager.active_terms.items():
         print(f"  {group}: {list(terms)}")
 
-    obs_terms = env.unwrapped.observation_manager.active_terms
-    # The history group is declared as a subclass of the proprio group so the two cannot
-    # drift apart. Assert it, because a configclass inheritance change would silently
-    # give the student a different observation layout than the actor.
-    check(
-        list(obs_terms["actor"]) == list(obs_terms["actor_history"]),
-        f"actor terms {list(obs_terms['actor'])} != actor_history terms {list(obs_terms['actor_history'])}",
-    )
     check(action_terms == ["leg_pos", "wheel_vel"], f"action term order is {action_terms}, expected ['leg_pos', 'wheel_vel']")
     check(env.num_actions == EXPECTED_NUM_ACTIONS, f"num_actions is {env.num_actions}, expected {EXPECTED_NUM_ACTIONS}")
-    check(obs["actor"].shape[-1] == EXPECTED_ACTOR_DIM, f"actor width is {obs['actor'].shape[-1]}, expected {EXPECTED_ACTOR_DIM}")
-    check(
-        tuple(obs["actor_history"].shape[1:]) == (EXPECTED_HISTORY_LENGTH, EXPECTED_ACTOR_DIM),
-        f"actor_history shape is {tuple(obs['actor_history'].shape[1:])}, "
-        f"expected ({EXPECTED_HISTORY_LENGTH}, {EXPECTED_ACTOR_DIM})",
-    )
-    check(
-        obs["dynamics_context"].shape[-1] == EXPECTED_DYNAMICS_CONTEXT_DIM,
-        f"dynamics_context width is {obs['dynamics_context'].shape[-1]}, expected {EXPECTED_DYNAMICS_CONTEXT_DIM}",
-    )
-    if args_cli.expect_critic_dim is not None:
-        check(
-            obs["critic"].shape[-1] == args_cli.expect_critic_dim,
-            f"critic width is {obs['critic'].shape[-1]}, expected {args_cli.expect_critic_dim}",
-        )
+    for group, shape in EXPECTED_OBS_SHAPES.items():
+        actual = tuple(obs[group].shape[1:]) if group in obs.keys() else None
+        check(actual == shape, f"observation group '{group}' has shape {actual}, expected {shape}")
 
     print(f"\n=== rolling out {args_cli.steps} steps with random actions ===")
     contact_fractions = []

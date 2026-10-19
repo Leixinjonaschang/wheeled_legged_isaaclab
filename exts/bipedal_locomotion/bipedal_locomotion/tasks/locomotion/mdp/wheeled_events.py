@@ -197,20 +197,8 @@ def randomize_com_offset(
 
 
 def randomize_terrain(env: ManagerBasedRLEnv, env_ids: torch.Tensor | None) -> None:
-    """Respawn on a randomly chosen sub-terrain patch.
-
-    Used only by the play configs, which disable the terrain-level curriculum: without a
-    curriculum every environment would otherwise stay on whichever patch it started on,
-    making a play session show a single difficulty.
-    """
+    """Respawn on a random sub-terrain patch (play configs, which disable the terrain curriculum)."""
     terrain = env.scene.terrain
-    # `terrain_origins` is None for a plane, and `terrain_levels` / `terrain_types` only
-    # exist once the importer has configured curriculum origins.
-    if terrain is None or getattr(terrain, "terrain_origins", None) is None:
-        return
-    if getattr(terrain, "terrain_levels", None) is None or getattr(terrain, "terrain_types", None) is None:
-        return
-
     env_ids = _resolve_env_ids(env, env_ids)
     num_rows, num_cols = terrain.terrain_origins.shape[:2]
     rows = torch.randint(0, num_rows, (len(env_ids),), device=env.device)
