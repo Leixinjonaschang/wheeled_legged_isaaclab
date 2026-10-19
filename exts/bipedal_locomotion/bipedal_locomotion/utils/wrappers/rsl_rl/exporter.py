@@ -59,13 +59,15 @@ def get_wheeled_legged_metadata(env: ManagerBasedRLEnv, run_path: str, policy=No
 
     obs_names = env.observation_manager.active_terms["proprio_history"]
     obs_cfgs = env.observation_manager._group_obs_term_cfgs["proprio_history"]
+    # Nominal (not randomised) drive gains, as mjlab reads them from the actuators' gain parameter: a
+    # velocity servo's (zero-stiffness) gain is its kv.
+    stiffness = robot.data.default_joint_stiffness[0, joint_ids]
+    damping = robot.data.default_joint_damping[0, joint_ids]
     metadata: dict[str, Any] = {
         "run_path": run_path,
         "joint_names": list(MJCF_JOINT_NAMES),
-        # Nominal (not randomised) drive gains. MuJoCo stores a velocity servo's kv as its "stiffness"
-        # too, so mjlab reports the wheels' stiffness as 0.5; PhysX's velocity drive has stiffness 0.
-        "joint_stiffness": robot.data.default_joint_stiffness[0, joint_ids].tolist(),
-        "joint_damping": robot.data.default_joint_damping[0, joint_ids].tolist(),
+        "joint_stiffness": torch.where(stiffness > 0.0, stiffness, damping).tolist(),
+        "joint_damping": damping.tolist(),
         "default_joint_pos": robot.data.default_joint_pos[0, joint_ids].tolist(),
         "command_names": list(env.command_manager.active_terms),
         "observation_names": obs_names,
