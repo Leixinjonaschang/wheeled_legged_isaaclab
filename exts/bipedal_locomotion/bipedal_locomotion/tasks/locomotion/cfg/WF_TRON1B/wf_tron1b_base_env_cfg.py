@@ -144,9 +144,10 @@ class WF_TRON1B_SceneCfg(InteractiveSceneCfg):
         debug_vis=False,
     )
 
-    # Every robot body, filtered on the terrain mesh: the force matrix is the terrain contact
-    # (mjlab's wheel / illegal-ground sensors), net minus matrix the robot-on-robot contact (its
-    # self-collision sensor). The history spans the physics substeps of one control step.
+    # Every robot body (incl. the wheel-motor housing links), filtered on the terrain mesh: the force
+    # matrix is the terrain contact (mjlab's wheel / illegal-ground sensors), net minus matrix the
+    # robot-on-robot contact (its self-collision sensor). The history spans the physics substeps of
+    # one control step.
     contact_forces = ContactSensorCfg(
         prim_path="{ENV_REGEX_NS}/Robot/.*_Link",
         filter_prim_paths_expr=["/World/ground/terrain/mesh"],
