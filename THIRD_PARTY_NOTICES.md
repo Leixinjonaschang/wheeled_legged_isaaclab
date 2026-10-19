@@ -64,7 +64,7 @@ Owner action required (RL owner + legal):
   [`rsl_rl/CHANGES_VS_UPSTREAM.md`](rsl_rl/CHANGES_VS_UPSTREAM.md).
   The base tag is attested by `rsl_rl/pyproject.toml` and
   `rsl_rl/CITATION.cff`; the vendored version string carries the local
-  suffix `5.3.0+limx.1`.
+  suffix `5.3.0+limx.2`.
 - **Diff versus upstream:** ✅ recorded in
   [`rsl_rl/CHANGES_VS_UPSTREAM.md`](rsl_rl/CHANGES_VS_UPSTREAM.md).
   Summary: the fork was re-synced from `v2.0.1` to `v5.3.0` in 2026-07
