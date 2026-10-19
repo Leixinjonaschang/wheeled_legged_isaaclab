@@ -1,8 +1,8 @@
 """Import the Isaac-Sim-free parts of the extension without importing the extension.
 
 ``bipedal_locomotion/__init__.py`` imports the task package, which imports Isaac Lab.
-The modules exercised by this test suite (``mdp/kernels.py``, ``mdp/domain_randomization.py``
-and ``utils/math.py``) deliberately depend on nothing but ``torch``, so they are loaded here
+The modules exercised by this test suite (``mdp/kernels.py``, ``mdp/domain_randomization.py``,
+``mdp/depth.py`` and ``utils/math.py``) deliberately depend on nothing but ``torch``, so they are loaded here
 by file path with stub parent packages registered in ``sys.modules``. That keeps the suite
 runnable on a machine with no Isaac Sim, which is the point of splitting the maths out in
 the first place.
@@ -48,3 +48,4 @@ kernels = _load("bipedal_locomotion.tasks.locomotion.mdp.kernels", "tasks/locomo
 domain_randomization = _load(
     "bipedal_locomotion.tasks.locomotion.mdp.domain_randomization", "tasks/locomotion/mdp/domain_randomization.py"
 )
+depth = _load("bipedal_locomotion.tasks.locomotion.mdp.depth", "tasks/locomotion/mdp/depth.py")
