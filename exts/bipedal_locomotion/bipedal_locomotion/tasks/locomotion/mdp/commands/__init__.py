@@ -1,10 +1,4 @@
-from .commands_cfg import UniformGaitCommandCfg, WheeledUniformVelocityCommandCfg
-from .gait_command import GaitCommand
+from .commands_cfg import WheeledUniformVelocityCommandCfg
 from .wheeled_velocity_command import WheeledUniformVelocityCommand
 
-__all__ = [
-    "GaitCommand",
-    "UniformGaitCommandCfg",
-    "WheeledUniformVelocityCommand",
-    "WheeledUniformVelocityCommandCfg",
-]
+__all__ = ["WheeledUniformVelocityCommand", "WheeledUniformVelocityCommandCfg"]
