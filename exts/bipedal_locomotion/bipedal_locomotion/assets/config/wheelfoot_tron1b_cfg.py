@@ -8,6 +8,10 @@ MuJoCo terms map one-to-one onto the PhysX joint model (Isaac Sim >= 5.0):
 actuator ``kp`` / ``kv`` -> drive stiffness / damping, joint ``damping`` (passive) ->
 ``viscous_friction``, joint ``frictionloss`` -> static and dynamic friction effort,
 ``forcerange`` -> ``effort_limit_sim``. MuJoCo has no joint velocity limit, so none is set.
+
+Besides the MJCF's nine bodies, the USD has two 1 g ``wheel_motor_[LR]_Link`` bodies fixed to
+the knees. They carry the wheel-motor housing colliders, which mjlab's geom-level contact groups
+leave out; per-body contact sensing can only do the same if the housings have their own bodies.
 """
 
 import math
@@ -19,6 +23,8 @@ from isaaclab.assets import ArticulationCfg
 
 _CURRENT_DIR = os.path.dirname(__file__)
 USD_PATH = os.path.join(_CURRENT_DIR, "../usd/WF_TRON1B/robot.usd")
+MESH_DIR = os.path.abspath(os.path.join(_CURRENT_DIR, "../mjcf/WF_TRON1B/meshes"))
+"""Visual meshes, ``<link>.STL`` in each link's frame (the MJCF visual geoms have no offset)."""
 
 WHEELFOOT_TRON1B_CFG = ArticulationCfg(
     spawn=sim_utils.UsdFileCfg(

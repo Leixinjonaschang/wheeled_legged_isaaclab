@@ -76,7 +76,7 @@
 | D4 | `leg_joint_torque` 惩罚哪些关节？ | 全部 8 个执行器（腿+轮） | mjlab 的 `SceneEntityCfg(joint_names=腿)` 不会解析 `actuator_ids`（保持 `slice(None)`），`joint_torques_l2` 实际对所有执行器求和；论文 run 的 `params/env.yaml` 已确认。忠实复现。 |
 | D5 | 地形课程语义 | 按 mjlab：每种子地形恰好一列、行难度 `row/(rows-1)`、按 proportion（最大余数法）把 env 分配到列；实现为 `ColumnPerTerrainGenerator` + `ProportionalTerrainImporter` | Isaac Lab 默认按 proportion 分配列、env 均分、难度带随机抖动，三点都与 mjlab 不同，平地列占比会从 28% 变成 50%（已实测 28.05%）。 |
 | D6 | 子地形实现 | 除平地（`MeshPlaneTerrainCfg`）外全部按 mjlab 几何重写，包括 heightfield 类 | Isaac Lab 同名内置地形在台阶数、障碍采样、hfield 网格间距（0.15 vs 0.1538 m）、竖墙修正上都与 mjlab 不同；4 种 box 地形 Isaac Lab 没有。用 mjlab 自己的随机抽样喂给移植函数，高度网格误差 ≤1e-7 m。 |
-| D7 | 深度相机实现 | 待 spike（TiledCamera vs RayCasterCamera） | mjlab 渲染 geom group 0/1（地形 + 机器人可视 mesh），TiledCamera 才能看到机器人自身；RayCasterCamera 快但只看地形。 |
+| D7 | 深度相机实现 | `RayCasterCamera`（地形）+ 对机器人自身轮子/膝部可视 mesh 的射线投射，逐像素取 min；只在 30 Hz 采样步计算 | mjlab 的相机本身就是对 geom group 0/1 的 BVH 射线投射：用训好的 OursGP 实测 27% 的帧能看到自己的轮子，必须复现。该实现与 mjlab 渲染逐像素一致（机器人掩码 IoU=1.000，深度误差 ≤1.3e-5 m）；4096 env 下每迭代约 +5%。TiledCamera 在本机 Isaac Sim 5.1 的 RTX 启动即段错误，且在共享 stage 上会看到相邻 env 的机器人。 |
 | D8 | 默认 logger | tensorboard | 本仓库惯例；mjlab 默认 wandb（project `mjlab`）。命令行 `--logger wandb` 可切换。 |
 | D9 | `num_envs` | 4096 | 与 mjlab 默认一致（旧 port 为 2048）。 |
 | D10 | 接触检测 | 一个覆盖全部 9 个 link 的接触传感器，按地形 mesh 过滤：force matrix = 地形接触（轮子 / 非法接触），net − matrix = 机器人自身接触（self-collision），历史 4 个物理子步 | mjlab 的接触传感器显式过滤 `secondary=terrain` / 自身子树；已运行时验证过滤与自碰撞分离正确。 |
@@ -94,6 +94,8 @@
 | D22 | PhysX 轮速稳态偏差 | 接受 | 带载时 PhysX 轮速比目标高约 +0.3%~+2.3%（MuJoCo −0.15%），调 solver/armature 无法消除，远小于 ±20% 的增益 DR。 |
 | D23 | 地形缓存与随机种子 | `use_cache=False`、`seed=None`（与 mjlab 相同，每次运行重新生成） | 50×20 网格生成 + 导入约 12 s。 |
 | D24 | 奖励/终止项写的 `Metrics/*` | 先暂存在 env 上，由 RSL-RL wrapper 在 step 后并入 `extras["log"]` | Isaac Lab 在任意 env reset 时重建 `extras["log"]`（mjlab 只在 step 开头清），否则这些指标几乎每步都会被丢掉。只影响日志。 |
-| D25 | 非法接触的粒度 | 按 body 统计，因此膝部 `wheel_motor` 碰撞体也算非法接触 | Isaac Lab 接触传感器按 body 不按 geom；mjlab 中这两个 geom 不在任何接触组里。 |
+| D25 | 膝部电机外壳碰撞体的接触 | USD 中把 `wheel_motor_[LR]_collision` 移到各自 1 g 的 `wheel_motor_[LR]_Link`（固定在膝上，碰撞位姿与过滤关系不变），接触传感因此与 mjlab 一样忽略外壳-地形接触；自碰撞仍包含外壳 | Isaac Lab 按 body 感知接触；若外壳留在膝 body 上，外壳触地就算非法接触。sim2sim 证实这是 Isaac Lab 摔倒率高 1.6–1.8 倍的原因（mjlab 也计外壳时差距消失）。 |
 | D26 | "接触"的判定 | 地形接触力 > 1 N（与 air time 用同一阈值） | mjlab 用"存在接触点"（`found > 0`）；PhysX 没有等价量。 |
 | D27 | 力矩 / 功率类奖励的力矩来源 | Isaac Lab 隐式执行器的 `applied_torque` 估计 | MuJoCo 用 `actuator_force` / `qfrc_actuator`；PhysX 不暴露隐式驱动的实际力矩。 |
+| D28 | 深度相机自遮挡包含哪些 link | 只投射 `wheel_L/R`、`knee_L/R` 的可视 mesh | mjlab 实测机器人像素 99% 来自这 4 个 link；与 mjlab 渲染对比 IoU=1.000（极端摆腿姿态下差 2 个像素，来自 abad/hip）。全部 9 个 link 可完全一致，但成本约 2.5 倍。 |
+| D29 | `non_finite_physics` 检查哪些传感器 | 只检查接触传感器（与 mjlab 一致） | 读取其它传感器的数据会强制懒更新的深度相机每步渲染；mjlab 只在 30 Hz 采样步读相机。 |

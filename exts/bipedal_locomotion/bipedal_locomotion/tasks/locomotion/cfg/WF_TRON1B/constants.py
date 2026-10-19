@@ -29,8 +29,8 @@ ALL_JOINT_NAMES = LEG_JOINT_NAMES + WHEEL_JOINT_NAMES
 
 WHEEL_BODY_NAMES = ("wheel_L_Link", "wheel_R_Link")
 # Bodies that must never touch the ground: the bodies of mjlab's NON_WHEEL_COLLISION_GEOMS.
-# Contact is sensed per body here, so the knees' `wheel_motor_[LR]_collision` geoms (in neither
-# of mjlab's contact groups) also count as illegal contact.
+# The knees' wheel-motor housings are in neither of mjlab's contact groups; the USD gives them
+# their own `wheel_motor_[LR]_Link` bodies so that per-body contact sensing can leave them out.
 NON_WHEEL_BODY_NAMES = (
     "base_Link",
     "abad_L_Link",
@@ -143,6 +143,25 @@ MJCF_BODY_NAMES = (
     "knee_R_Link",
     "wheel_R_Link",
 )
+
+# Depth camera: the MJCF's `d435` on base_Link, rendered and post-processed as in mjlab.
+DEPTH_CAMERA_SENSOR = "depth_camera"
+DEPTH_CAMERA_POS = (0.13223, 0.0222, -0.26826)
+DEPTH_CAMERA_ROT = (0.6845068, 0.1773382, -0.17733755, -0.68450931)  # MuJoCo cam_quat (w, x, y, z), OpenGL
+DEPTH_CAMERA_FOVY_DEG = 58.0
+DEPTH_CAMERA_WIDTH = 53
+DEPTH_CAMERA_HEIGHT = 30
+# The only links that enter the image (mjlab renders the robot's visual geoms too).
+DEPTH_CAMERA_VISIBLE_LINKS = ("wheel_L_Link", "wheel_R_Link", "knee_L_Link", "knee_R_Link")
+DEPTH_LEFT_CROP = 8  # the real D435 image has a dark left border
+DEPTH_MIN_M = 0.2
+DEPTH_MAX_M = 2.0
+DEPTH_CAPTURE_FREQUENCY_HZ = 30.0
+DEPTH_SYSTEM_DELAY_RANGE_S = (0.0, 0.020)
+# Per-reset camera calibration randomisation, around the nominal mount.
+DEPTH_CAMERA_POSITION_DELTA_RANGE_M = (-0.010, 0.010)
+DEPTH_CAMERA_PITCH_DELTA_RANGE_RAD = (-math.radians(1.0), math.radians(1.0))
+DEPTH_CAMERA_FOVY_DELTA_RANGE_DEG = (-1.0, 1.0)
 
 # Observation noise, matching the mjlab task.
 NOISE_BASE_ANG_VEL = 0.2

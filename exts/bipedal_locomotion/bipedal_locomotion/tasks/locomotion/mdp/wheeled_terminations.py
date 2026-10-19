@@ -8,6 +8,7 @@ import torch
 
 from bipedal_locomotion.utils.math import wrap_to_pi
 from isaaclab.managers import ManagerTermBase, SceneEntityCfg, TerminationTermCfg
+from isaaclab.sensors import ContactSensor
 
 from .kernels import CommandTrackingMonitor, contact_substep_count
 from .sensor_utils import contact_state, terrain_forces
@@ -33,10 +34,11 @@ def non_finite_physics(env: ManagerBasedRLEnv, asset_cfg: SceneEntityCfg = _ROBO
         asset.data.applied_torque,
     ):
         bad |= ~torch.isfinite(tensor).reshape(env.num_envs, -1).all(dim=1)
+    # Contact sensors only, as in mjlab: reading any other sensor's data would force its lazy update every
+    # step (the depth camera renders only on capture steps).
     for sensor in env.scene.sensors.values():
-        forces = getattr(sensor.data, "net_forces_w", None)
-        if forces is not None:
-            bad |= ~torch.isfinite(forces).reshape(env.num_envs, -1).all(dim=1)
+        if isinstance(sensor, ContactSensor):
+            bad |= ~torch.isfinite(sensor.data.net_forces_w).reshape(env.num_envs, -1).all(dim=1)
     return bad
 
 
