@@ -13,11 +13,7 @@ several of them intentionally differ from a similarly named upstream term -- not
 from isaaclab_tasks.manager_based.locomotion.velocity.mdp import *  # noqa: F401,F403
 
 from .commands import *  # noqa: F401,F403
-from .curriculums import *  # noqa: F401,F403
 from .domain_randomization import *  # noqa: F401,F403
-from .events import *  # noqa: F401,F403
-from .observations import *  # noqa: F401,F403
-from .rewards import *  # noqa: F401,F403
 from .wheeled_actions import *  # noqa: F401,F403
 from .wheeled_curriculums import *  # noqa: F401,F403
 from .wheeled_events import *  # noqa: F401,F403
