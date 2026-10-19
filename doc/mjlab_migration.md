@@ -74,8 +74,9 @@
 | D2 | `BlindGP` 按注册的任务迁，还是按论文 blind 基线迁？ | 按注册的任务（`RepresentationVelocityActorCritic` + `RepresentationVelocityTeacherStudentPPO`） | `logs/paper_train_logs/blind_*` 实际用的是未提交的 `PredictBlindGP`（blind + latent dynamics predictor）。若要的是论文基线，只需再加 model 文件和 runner cfg。 |
 | D3 | 轮-地摩擦的组合规则 | PhysX `friction_combine_mode="max"`，地形 μ=1.0 | MuJoCo 默认取两 geom 摩擦的 max（已实测验证）。mjlab 的轮子摩擦 DR 范围 [0.41, 1.14]，所以等效摩擦只在 μ_wheel>1 时才变化。为忠实复现采用 max；若本意是让 DR 覆盖低摩擦，应改 multiply（会改变训练分布）。 |
 | D4 | `leg_joint_torque` 惩罚哪些关节？ | 全部 8 个执行器（腿+轮） | mjlab 的 `SceneEntityCfg(joint_names=腿)` 不会解析 `actuator_ids`（保持 `slice(None)`），`joint_torques_l2` 实际对所有执行器求和；论文 run 的 `params/env.yaml` 已确认。忠实复现。 |
-| D5 | 地形课程语义 | 按 mjlab：每种子地形恰好一列、行难度 `row/(rows-1)`、按 proportion 把 env 分配到列 | Isaac Lab 默认按 proportion 分配列、env 均分、难度带随机抖动，三点都与 mjlab 不同，平地列占比会从 28% 变成 50%。 |
-| D6 | Isaac Lab 没有的 4 种 box 地形 | 按 mjlab 几何重写为 mesh 地形 | `random_stairs`、`random_spread`、`stepping_stones`、`tilted_grid`。 |
+| D5 | 地形课程语义 | 按 mjlab：每种子地形恰好一列、行难度 `row/(rows-1)`、按 proportion（最大余数法）把 env 分配到列；实现为 `ColumnPerTerrainGenerator` + `ProportionalTerrainImporter` | Isaac Lab 默认按 proportion 分配列、env 均分、难度带随机抖动，三点都与 mjlab 不同，平地列占比会从 28% 变成 50%（已实测 28.05%）。 |
+| D6 | 子地形实现 | 除平地（`MeshPlaneTerrainCfg`）外全部按 mjlab 几何重写，包括 heightfield 类 | Isaac Lab 同名内置地形在台阶数、障碍采样、hfield 网格间距（0.15 vs 0.1538 m）、竖墙修正上都与 mjlab 不同；4 种 box 地形 Isaac Lab 没有。用 mjlab 自己的随机抽样喂给移植函数，高度网格误差 ≤1e-7 m。 |
+| D23 | 地形缓存与随机种子 | `use_cache=False`、`seed=None`（与 mjlab 相同，每次运行重新生成） | 50×20 网格生成 + 导入约 12 s。 |
 | D7 | 深度相机实现 | 待 spike（TiledCamera vs RayCasterCamera） | mjlab 渲染 geom group 0/1（地形 + 机器人可视 mesh），TiledCamera 才能看到机器人自身；RayCasterCamera 快但只看地形。 |
 | D8 | 默认 logger | tensorboard | 本仓库惯例；mjlab 默认 wandb（project `mjlab`）。命令行 `--logger wandb` 可切换。 |
 | D9 | `num_envs` | 4096 | 与 mjlab 默认一致（旧 port 为 2048）。 |
