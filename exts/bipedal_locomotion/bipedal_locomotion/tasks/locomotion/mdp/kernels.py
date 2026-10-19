@@ -18,12 +18,15 @@ from typing import NamedTuple
 import torch
 
 __all__ = [
+    "CommandTrackingMonitor",
     "TerrainRoughnessStats",
     "air_time_balance_cost",
     "base_height_error_sq",
     "body_positions_in_base_frame",
+    "contact_substep_count",
     "delay_step_bounds",
     "encode_contact_forces",
+    "ground_height_quantile",
     "heights_from_raycast",
     "normalize_to_unit_range",
     "posture_reward",
@@ -32,6 +35,7 @@ __all__ = [
     "roughness_gate_active",
     "roughness_gate_inactive",
     "scheduled_gate_threshold",
+    "smoothstep_gate",
     "terrain_normal_from_points",
     "terrain_roughness_from_height_samples",
     "track_angular_velocity_reward",
@@ -146,8 +150,7 @@ def terrain_roughness_from_height_samples(
 
     foot_roughness = torch.maximum(jump / wheel_radius, curvature / wheel_radius)
     robot_roughness = foot_roughness.max(dim=1).values
-    u = torch.clamp((robot_roughness - gate_min) / (gate_max - gate_min), 0.0, 1.0)
-    gate = u * u * (3.0 - 2.0 * u)
+    gate = smoothstep_gate(robot_roughness, gate_min, gate_max)
     return TerrainRoughnessStats(
         jump=jump,
         curvature=curvature,
@@ -155,6 +158,12 @@ def terrain_roughness_from_height_samples(
         robot_roughness=robot_roughness,
         gate=gate,
     )
+
+
+def smoothstep_gate(roughness: torch.Tensor, gate_min: float, gate_max: float) -> torch.Tensor:
+    """Smoothstep of ``roughness`` over ``[gate_min, gate_max]``, in [0, 1]."""
+    u = torch.clamp((roughness - gate_min) / (gate_max - gate_min), 0.0, 1.0)
+    return u * u * (3.0 - 2.0 * u)
 
 
 def roughness_gate_active(gate: torch.Tensor, threshold: float = 0.2) -> torch.Tensor:
@@ -217,6 +226,19 @@ def heights_from_raycast(
     """
     heights = frame_z - hit_z
     return torch.where(miss_mask, torch.full_like(heights, max_distance), heights)
+
+
+def ground_height_quantile(hit_z: torch.Tensor, valid: torch.Tensor, quantile: float) -> torch.Tensor:
+    """Quantile of the valid ray-hit heights per environment, 0 where no ray hit (mjlab ``base_height_l2``).
+
+    Args:
+        hit_z: World-frame z of each ray hit, shape ``[B, N]``.
+        valid: True where the ray hit something, shape ``[B, N]``.
+    """
+    if not 0.0 <= quantile <= 1.0:
+        raise ValueError(f"quantile must be in [0, 1], got {quantile}")
+    ground_z = torch.nanquantile(torch.where(valid, hit_z, torch.full_like(hit_z, torch.nan)), quantile, dim=1)
+    return torch.nan_to_num(ground_z, nan=0.0)
 
 
 def terrain_normal_from_points(
@@ -467,6 +489,18 @@ def encode_contact_forces(forces_b: torch.Tensor) -> torch.Tensor:
     return torch.sign(flat) * torch.log1p(torch.abs(flat))
 
 
+def contact_substep_count(force_history: torch.Tensor, threshold: float) -> torch.Tensor:
+    """Number of history substeps in which any body's contact force exceeds ``threshold``.
+
+    mjlab's ``self_collision_cost``; ``> 0`` is its ``illegal_contact`` termination.
+
+    Args:
+        force_history: Contact forces, shape ``[B, H, N, 3]``.
+    """
+    force = torch.nan_to_num(force_history, nan=0.0, posinf=0.0, neginf=0.0)
+    return (torch.norm(force, dim=-1) > threshold).any(dim=-1).sum(dim=-1).float()
+
+
 def air_time_balance_cost(
     cumulative_air_time: torch.Tensor,
     min_total_air_time: float,
@@ -541,3 +575,116 @@ def delay_step_bounds(delay_range_s: tuple[float, float], physics_dt: float) -> 
             f"got delay_range_s={delay_range_s} and physics_dt={physics_dt}."
         )
     return min_steps, max_steps
+
+
+# --------------------------------------------------------------------------------------
+# Command tracking failure
+# --------------------------------------------------------------------------------------
+
+
+class CommandTrackingMonitor:
+    """Per-environment counters of mjlab's ``world_command_tracking_failure`` termination.
+
+    Terminates when world-frame progress, velocity direction or heading stays bad for long
+    enough. Checks start after a grace period following each new command and are skipped while
+    both wheels are airborne.
+    """
+
+    def __init__(self, num_envs: int, device) -> None:
+        self.progress_bad_steps = torch.zeros(num_envs, device=device, dtype=torch.long)
+        self.direction_bad_steps = torch.zeros_like(self.progress_bad_steps)
+        self.heading_bad_steps = torch.zeros_like(self.progress_bad_steps)
+        self.command_age_steps = torch.zeros_like(self.progress_bad_steps)
+        self.last_command_counter = torch.full_like(self.progress_bad_steps, -1)
+
+    def update(
+        self,
+        *,
+        command_counter: torch.Tensor,
+        command_xy: torch.Tensor,
+        actual_xy: torch.Tensor,
+        heading_error: torch.Tensor,
+        grounded: torch.Tensor,
+        is_heading_env: torch.Tensor,
+        is_standing_env: torch.Tensor,
+        enabled: bool,
+        step_dt: float,
+        command_norm_threshold: float,
+        progress_deficit_threshold: float,
+        min_progress_ratio: float,
+        progress_duration_s: float,
+        actual_speed_threshold: float,
+        direction_angle_threshold_deg: float,
+        direction_duration_s: float,
+        heading_error_threshold_deg: float,
+        heading_duration_s: float,
+        heading_alignment_gate_deg: float,
+        command_grace_s: float,
+    ) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
+        """Advance one policy step. Returns the termination flags and logging metrics.
+
+        Args:
+            command_xy: World-frame linear command, ``[B, 2]``.
+            actual_xy: World-frame base linear velocity, ``[B, 2]``.
+            heading_error: Wrapped heading-target minus heading, ``[B]``.
+            grounded: True where at least one wheel touches the terrain, ``[B]``.
+            enabled: Whether the training step has reached the activation step.
+        """
+        command_changed = command_counter != self.last_command_counter
+        self.command_age_steps = torch.where(command_changed, 0, self.command_age_steps + 1)
+        self.last_command_counter = command_counter.clone()
+
+        command_norm = torch.norm(command_xy, dim=1)
+        actual_speed = torch.norm(actual_xy, dim=1)
+        command_direction = command_xy / command_norm.unsqueeze(1).clamp_min(1.0e-6)
+        progress_velocity = torch.sum(actual_xy * command_direction, dim=1)
+        progress_deficit = torch.clamp(command_norm - progress_velocity, min=0.0)
+        progress_ratio = progress_velocity / command_norm.clamp_min(1.0e-6)
+        cos_angle = torch.clamp(progress_velocity / (actual_speed + 1.0e-6), -1.0, 1.0)
+        heading_error = torch.abs(heading_error)
+
+        command_active = (
+            enabled
+            & (command_norm > command_norm_threshold)
+            & (self.command_age_steps >= max(0, math.ceil(command_grace_s / step_dt)))
+        )
+        heading_aligned = heading_error < math.radians(heading_alignment_gate_deg)
+        linear_check_active = command_active & grounded & heading_aligned
+        heading_check_active = command_active & grounded & is_heading_env & ~is_standing_env
+
+        bad_progress = linear_check_active & (
+            (progress_deficit > progress_deficit_threshold) | (progress_ratio < min_progress_ratio)
+        )
+        bad_direction = (
+            linear_check_active
+            & (actual_speed > actual_speed_threshold)
+            & (cos_angle < math.cos(math.radians(direction_angle_threshold_deg)))
+        )
+        bad_heading = heading_check_active & (heading_error > math.radians(heading_error_threshold_deg))
+        self.progress_bad_steps = torch.where(bad_progress, self.progress_bad_steps + 1, 0)
+        self.direction_bad_steps = torch.where(bad_direction, self.direction_bad_steps + 1, 0)
+        self.heading_bad_steps = torch.where(bad_heading, self.heading_bad_steps + 1, 0)
+
+        done = (
+            (self.progress_bad_steps >= max(1, math.ceil(progress_duration_s / step_dt)))
+            | (self.direction_bad_steps >= max(1, math.ceil(direction_duration_s / step_dt)))
+            | (self.heading_bad_steps >= max(1, math.ceil(heading_duration_s / step_dt)))
+        )
+        metrics = {
+            "progress_deficit_mean": progress_deficit.mean(),
+            "progress_bad_frac": bad_progress.float().mean(),
+            "direction_angle_mean": torch.rad2deg(torch.acos(cos_angle)).mean(),
+            "direction_bad_frac": bad_direction.float().mean(),
+            "heading_error_deg_mean": torch.rad2deg(heading_error).mean(),
+            "heading_bad_frac": bad_heading.float().mean(),
+            "airborne_frac": (~grounded).float().mean(),
+            "active": torch.tensor(float(enabled), device=command_xy.device),
+        }
+        return done, metrics
+
+    def reset(self, env_ids: torch.Tensor | slice) -> None:
+        self.progress_bad_steps[env_ids] = 0
+        self.direction_bad_steps[env_ids] = 0
+        self.heading_bad_steps[env_ids] = 0
+        self.command_age_steps[env_ids] = 0
+        self.last_command_counter[env_ids] = -1
