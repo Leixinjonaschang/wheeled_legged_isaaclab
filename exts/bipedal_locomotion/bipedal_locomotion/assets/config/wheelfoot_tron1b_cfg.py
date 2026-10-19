@@ -19,6 +19,8 @@ from isaaclab.assets import ArticulationCfg
 
 _CURRENT_DIR = os.path.dirname(__file__)
 USD_PATH = os.path.join(_CURRENT_DIR, "../usd/WF_TRON1B/robot.usd")
+MESH_DIR = os.path.abspath(os.path.join(_CURRENT_DIR, "../mjcf/WF_TRON1B/meshes"))
+"""Visual meshes, ``<link>.STL`` in each link's frame (the MJCF visual geoms have no offset)."""
 
 WHEELFOOT_TRON1B_CFG = ArticulationCfg(
     spawn=sim_utils.UsdFileCfg(
