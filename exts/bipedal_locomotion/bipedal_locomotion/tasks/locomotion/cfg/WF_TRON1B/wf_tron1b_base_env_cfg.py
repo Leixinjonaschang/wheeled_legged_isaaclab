@@ -25,6 +25,7 @@ import math
 
 from bipedal_locomotion.assets.config.wheelfoot_tron1b_cfg import WHEELFOOT_TRON1B_CFG
 from bipedal_locomotion.tasks.locomotion import mdp
+from bipedal_locomotion.terrains import ProportionalTerrainImporter
 from isaaclab.envs import ManagerBasedRLEnvCfg
 from isaaclab.managers import CurriculumTermCfg as CurrTerm
 from isaaclab.managers import EventTermCfg as EventTerm
@@ -77,13 +78,16 @@ class WF_TRON1B_SceneCfg(InteractiveSceneCfg):
     """Terrain, robot, height scans and contact sensors."""
 
     terrain = TerrainImporterCfg(
+        class_type=ProportionalTerrainImporter,
         prim_path="/World/ground",
         terrain_type="generator",
         terrain_generator=WF_TRON1B_TERRAINS_CFG,
         max_init_terrain_level=8,
         collision_group=-1,
+        # MuJoCo combines the friction of two geoms by taking the max; "max" makes PhysX
+        # do the same, so the randomised wheel friction only matters where it exceeds 1.
         physics_material=sim_utils.RigidBodyMaterialCfg(
-            friction_combine_mode="multiply",
+            friction_combine_mode="max",
             restitution_combine_mode="multiply",
             static_friction=1.0,
             dynamic_friction=1.0,
