@@ -51,6 +51,7 @@ EXPECTED_OBS_SHAPES = {
     "wheel_roughness": (2,),
     "dynamics_context": (87,),
 }
+DEPTH_OBS_SHAPE = (1, 30, 45)  # depth tasks only
 EXPECTED_NUM_ACTIONS = 8
 
 
@@ -81,7 +82,10 @@ def main() -> int:
 
     check(action_terms == ["leg_pos", "wheel_vel"], f"action term order is {action_terms}, expected ['leg_pos', 'wheel_vel']")
     check(env.num_actions == EXPECTED_NUM_ACTIONS, f"num_actions is {env.num_actions}, expected {EXPECTED_NUM_ACTIONS}")
-    for group, shape in EXPECTED_OBS_SHAPES.items():
+    expected_shapes = dict(EXPECTED_OBS_SHAPES)
+    if "depth_camera" in obs.keys():
+        expected_shapes["depth_camera"] = DEPTH_OBS_SHAPE
+    for group, shape in expected_shapes.items():
         actual = tuple(obs[group].shape[1:]) if group in obs.keys() else None
         check(actual == shape, f"observation group '{group}' has shape {actual}, expected {shape}")
 
