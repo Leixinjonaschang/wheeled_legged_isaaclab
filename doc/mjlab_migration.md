@@ -94,7 +94,7 @@
 | D22 | PhysX 轮速稳态偏差 | 接受 | 带载时 PhysX 轮速比目标高约 +0.3%~+2.3%（MuJoCo −0.15%），调 solver/armature 无法消除，远小于 ±20% 的增益 DR。 |
 | D23 | 地形缓存与随机种子 | `use_cache=False`、`seed=None`（与 mjlab 相同，每次运行重新生成） | 50×20 网格生成 + 导入约 12 s。 |
 | D24 | 奖励/终止项写的 `Metrics/*` | 先暂存在 env 上，由 RSL-RL wrapper 在 step 后并入 `extras["log"]` | Isaac Lab 在任意 env reset 时重建 `extras["log"]`（mjlab 只在 step 开头清），否则这些指标几乎每步都会被丢掉。只影响日志。 |
-| D25 | 非法接触的粒度 | 按 body 统计，因此膝部 `wheel_motor` 碰撞体也算非法接触 | Isaac Lab 接触传感器按 body 不按 geom；mjlab 中这两个 geom 不在任何接触组里。 |
+| D25 | 膝部电机外壳碰撞体的接触 | USD 中把 `wheel_motor_[LR]_collision` 移到各自 1 g 的 `wheel_motor_[LR]_Link`（固定在膝上，碰撞位姿与过滤关系不变），接触传感因此与 mjlab 一样忽略外壳-地形接触；自碰撞仍包含外壳 | Isaac Lab 按 body 感知接触；若外壳留在膝 body 上，外壳触地就算非法接触。sim2sim 证实这是 Isaac Lab 摔倒率高 1.6–1.8 倍的原因（mjlab 也计外壳时差距消失）。 |
 | D26 | "接触"的判定 | 地形接触力 > 1 N（与 air time 用同一阈值） | mjlab 用"存在接触点"（`found > 0`）；PhysX 没有等价量。 |
 | D27 | 力矩 / 功率类奖励的力矩来源 | Isaac Lab 隐式执行器的 `applied_torque` 估计 | MuJoCo 用 `actuator_force` / `qfrc_actuator`；PhysX 不暴露隐式驱动的实际力矩。 |
 | D28 | 深度相机自遮挡包含哪些 link | 只投射 `wheel_L/R`、`knee_L/R` 的可视 mesh | mjlab 实测机器人像素 99% 来自这 4 个 link；与 mjlab 渲染对比 IoU=1.000（极端摆腿姿态下差 2 个像素，来自 abad/hip）。全部 9 个 link 可完全一致，但成本约 2.5 倍。 |
