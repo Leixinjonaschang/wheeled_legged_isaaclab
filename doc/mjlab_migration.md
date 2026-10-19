@@ -97,3 +97,5 @@
 | D25 | 非法接触的粒度 | 按 body 统计，因此膝部 `wheel_motor` 碰撞体也算非法接触 | Isaac Lab 接触传感器按 body 不按 geom；mjlab 中这两个 geom 不在任何接触组里。 |
 | D26 | "接触"的判定 | 地形接触力 > 1 N（与 air time 用同一阈值） | mjlab 用"存在接触点"（`found > 0`）；PhysX 没有等价量。 |
 | D27 | 力矩 / 功率类奖励的力矩来源 | Isaac Lab 隐式执行器的 `applied_torque` 估计 | MuJoCo 用 `actuator_force` / `qfrc_actuator`；PhysX 不暴露隐式驱动的实际力矩。 |
+| D28 | 深度相机自遮挡包含哪些 link | 只投射 `wheel_L/R`、`knee_L/R` 的可视 mesh | mjlab 实测机器人像素 99% 来自这 4 个 link；与 mjlab 渲染对比 IoU=1.000（极端摆腿姿态下差 2 个像素，来自 abad/hip）。全部 9 个 link 可完全一致，但成本约 2.5 倍。 |
+| D29 | `non_finite_physics` 检查哪些传感器 | 只检查接触传感器（与 mjlab 一致） | 读取其它传感器的数据会强制懒更新的深度相机每步渲染；mjlab 只在 30 Hz 采样步读相机。 |
