@@ -1,24 +1,19 @@
-"""Base environment configuration for the WF-TRON1B velocity task.
+"""Base environment configuration for the WF-TRON1B velocity tasks: mjlab's rough-terrain
+``rep_ts_lin_vel`` environment (``make_env_cfg(rough=True, lin_vel_representation=True)``).
 
-This class is the **rough-terrain superset**. The flat variant subclasses it and sets the
-terrain-dependent sensors, rewards, observations and terminations to ``None``.
+Observation groups:
 
-That direction matters: Isaac Lab's observation manager iterates a group's fields in
-declaration order and skips the ``None`` ones, so nulling from a superset preserves the
-relative order of everything that remains. Declaring flat as the base and *adding* rough
-terms would append them in a different order than the mjlab reference, silently permuting
-the critic's input vector.
-
-Group widths (asserted by ``tests/`` and by the smoke script):
-
-===================  ======  ======
-group                flat    rough
-===================  ======  ======
-``actor``            31      31
-``actor_history``    5 x 31  5 x 31
-``critic``           42      166
-``dynamics_context`` 87      87
-===================  ======  ======
+=======================  ===========  =============================================
+group                    width        consumer
+=======================  ===========  =============================================
+``proprio_history``      5 x 28       student encoder (oldest to newest), deployed
+``actor_command``        3            actor, deployed
+``lin_vel_target``       3            student velocity-regression target
+``critic``               166          critic (+ ``dynamics_context``)
+``privileged_encoder``   160          teacher encoder (+ ``dynamics_context``)
+``wheel_roughness``      2            depth model's roughness head
+``dynamics_context``     87           critic / teacher encoder
+=======================  ===========  =============================================
 """
 
 import math
@@ -100,9 +95,8 @@ class WF_TRON1B_SceneCfg(InteractiveSceneCfg):
 
     robot = WHEELFOOT_TRON1B_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
 
-    # Base-mounted scan: the critic's terrain map and, with the per-wheel scans, the
-    # input to the roughness gate. Yaw-aligned so the map turns with the robot but does
-    # not tilt with it -- a pitching robot should not see the ground swing away.
+    # Base-mounted scan: the critic's terrain map and the input to the roughness gate.
+    # Yaw-aligned so the map turns with the robot but does not tilt with it.
     terrain_scan = RayCasterCfg(
         prim_path="{ENV_REGEX_NS}/Robot/" + C.BASE_BODY,
         offset=RayCasterCfg.OffsetCfg(pos=(0.0, 0.0, 0.0)),
@@ -219,8 +213,8 @@ class ActionsCfg:
 @configclass
 class ObservationsCfg:
     @configclass
-    class ProprioCfg(ObsGroup):
-        """Everything the deployed robot can measure. Term order is the ONNX contract."""
+    class ProprioHistoryCfg(ObsGroup):
+        """What the deployed robot measures, corrupted and stacked oldest to newest. Term order is the ONNX contract."""
 
         base_ang_vel = ObsTerm(func=mdp.base_ang_vel, noise=Unoise(n_min=-C.NOISE_BASE_ANG_VEL, n_max=C.NOISE_BASE_ANG_VEL))
         projected_gravity = ObsTerm(
@@ -238,8 +232,6 @@ class ObservationsCfg:
             noise=Unoise(n_min=-C.NOISE_JOINT_VEL, n_max=C.NOISE_JOINT_VEL),
             scale=C.SCALE_JOINT_VEL,
         )
-        # Wheel *position* is deliberately absent: it is unbounded and carries no
-        # information the policy can act on. Only wheel velocity is observed.
         wheel_vel = ObsTerm(
             func=mdp.joint_vel_rel,
             params={"asset_cfg": _WHEEL_JOINTS},
@@ -247,26 +239,20 @@ class ObservationsCfg:
             scale=C.SCALE_WHEEL_VEL,
         )
         actions = ObsTerm(func=mdp.last_action)
-        command = ObsTerm(func=mdp.generated_commands, params={"command_name": C.COMMAND_NAME})
 
         def __post_init__(self):
-            self.enable_corruption = False
-            self.concatenate_terms = True
-
-    @configclass
-    class ProprioHistoryCfg(ProprioCfg):
-        """The same terms, corrupted and stacked over time.
-
-        Unflattened so the shape stays ``[B, T, F]``: the representation models consume
-        the time axis directly, and the exported metadata declares the frame order as
-        oldest-to-newest.
-        """
-
-        def __post_init__(self):
-            super().__post_init__()
             self.enable_corruption = True
+            self.concatenate_terms = True
             self.history_length = C.HISTORY_LENGTH
             self.flatten_history_dim = False
+
+    @configclass
+    class ActorCommandCfg(ObsGroup):
+        command = ObsTerm(func=mdp.generated_commands, params={"command_name": C.COMMAND_NAME})
+
+    @configclass
+    class LinVelTargetCfg(ObsGroup):
+        base_lin_vel = ObsTerm(func=mdp.base_link_lin_vel)
 
     @configclass
     class CriticCfg(ObsGroup):
@@ -282,7 +268,6 @@ class ObservationsCfg:
         command = ObsTerm(func=mdp.generated_commands, params={"command_name": C.COMMAND_NAME})
         wheel_contact = ObsTerm(func=mdp.wheel_contact, params={"sensor_cfg": _WHEEL_CONTACTS})
         wheel_contact_forces = ObsTerm(func=mdp.wheel_contact_forces, params={"sensor_cfg": _WHEEL_CONTACTS})
-        # Terrain-dependent; nulled by the flat config.
         height_scan = ObsTerm(
             func=mdp.terrain_height_scan,
             params={"sensor_cfg": _TERRAIN_SCAN, "max_distance": C.TERRAIN_SCAN_MAX_DISTANCE},
@@ -304,23 +289,40 @@ class ObservationsCfg:
             },
         )
 
+    @configclass
+    class PrivilegedEncoderCfg(CriticCfg):
+        """The critic terms minus what the teacher latent must not shortcut: velocity and command."""
+
         def __post_init__(self):
-            self.enable_corruption = False
-            self.concatenate_terms = True
+            self.base_lin_vel = None
+            self.command = None
+
+    @configclass
+    class WheelRoughnessCfg(ObsGroup):
+        wheel_roughness = ObsTerm(
+            func=mdp.wheel_roughness_gate,
+            params={
+                "sensor_names": C.WHEEL_HEIGHT_SENSORS,
+                "wheel_radius": C.WHEEL_RADIUS,
+                "gate_min": C.ROUGHNESS_GATE_MIN,
+                "gate_max": C.ROUGHNESS_GATE_MAX,
+                "grid_shape": C.WHEEL_HEIGHT_GRID_SHAPE,
+                "max_distance": C.WHEEL_HEIGHT_MAX_DISTANCE,
+            },
+        )
 
     @configclass
     class DynamicsContextCfg(ObsGroup):
-        """What was randomised at startup (87 values). Consumed by the critic and the teacher encoder."""
+        """What was randomised at startup (87 values)."""
 
         domain_randomization_delta_quantity = ObsTerm(func=mdp.domain_randomization_delta_quantity)
 
-        def __post_init__(self):
-            self.enable_corruption = False
-            self.concatenate_terms = True
-
-    actor: ProprioCfg = ProprioCfg()
-    actor_history: ProprioHistoryCfg = ProprioHistoryCfg()
+    proprio_history: ProprioHistoryCfg = ProprioHistoryCfg()
+    actor_command: ActorCommandCfg = ActorCommandCfg()
+    lin_vel_target: LinVelTargetCfg = LinVelTargetCfg()
     critic: CriticCfg = CriticCfg()
+    privileged_encoder: PrivilegedEncoderCfg = PrivilegedEncoderCfg()
+    wheel_roughness: WheelRoughnessCfg = WheelRoughnessCfg()
     dynamics_context: DynamicsContextCfg = DynamicsContextCfg()
 
 
@@ -514,7 +516,7 @@ class RewardsCfg:
         params={"sensor_cfg": _WHEEL_CONTACTS, "min_total_air_time": 1.0, "balance_tolerance": 0.2},
     )
 
-    # -- terrain-gated: legged motion on rough terrain (nulled by the flat config)
+    # -- terrain-gated: legged motion on rough terrain
     rough_wheel_usage = RewTerm(
         func=mdp.rough_wheel_usage,
         weight=-1.5e-2,
@@ -632,7 +634,7 @@ class CurriculumCfg:
 
 @configclass
 class WF_TRON1B_BaseEnvCfg(ManagerBasedRLEnvCfg):
-    """Rough-terrain WF-TRON1B velocity tracking. Flat is a nulled-down subclass."""
+    """Rough-terrain WF-TRON1B velocity tracking with the representation observation groups."""
 
     scene: WF_TRON1B_SceneCfg = WF_TRON1B_SceneCfg(num_envs=C.NUM_ENVS, env_spacing=2.5)
     observations: ObservationsCfg = ObservationsCfg()
@@ -651,16 +653,10 @@ class WF_TRON1B_BaseEnvCfg(ManagerBasedRLEnvCfg):
         self.sim.physics_material = self.scene.terrain.physics_material
         self.seed = 0
 
-        if self.scene.terrain_scan is not None:
-            self.scene.terrain_scan.update_period = self.decimation * self.sim.dt
-        if self.scene.wheel_height_scan_L is not None:
-            self.scene.wheel_height_scan_L.update_period = self.decimation * self.sim.dt
-        if self.scene.wheel_height_scan_R is not None:
-            self.scene.wheel_height_scan_R.update_period = self.decimation * self.sim.dt
+        for scan in (self.scene.terrain_scan, self.scene.wheel_height_scan_L, self.scene.wheel_height_scan_R):
+            scan.update_period = self.decimation * self.sim.dt
         self.scene.contact_forces.update_period = self.sim.dt
-
-        if self.scene.terrain.terrain_generator is not None:
-            self.scene.terrain.terrain_generator.curriculum = True
+        self.scene.terrain.terrain_generator.curriculum = True
 
         self.viewer.origin_type = "env"
 

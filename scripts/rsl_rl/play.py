@@ -30,7 +30,7 @@ parser.add_argument(
     help=(
         "Which path of a teacher-student policy to run. The student sees only "
         "proprioception and is what deploys; the teacher sees privileged observations "
-        "and is useful for checking how much the distillation gave up. Ignored by plain PPO."
+        "and is useful for checking how much the distillation gave up."
     ),
 )
 cli_args.add_rsl_rl_args(parser)
@@ -68,15 +68,9 @@ from bipedal_locomotion.utils.wrappers.rsl_rl import (
 
 
 def _select_policy(policy, policy_role: str):
-    """Return the callable that maps an observation TensorDict to actions."""
+    """The student (deployed) or teacher (privileged) path of the teacher-student policy."""
     if policy_role == "teacher":
-        act_teacher = getattr(policy, "act_teacher", None)
-        if act_teacher is None:
-            raise ValueError(
-                "--policy_role teacher requires a teacher-student policy; this checkpoint's "
-                f"policy class {type(policy).__name__} has no act_teacher()."
-            )
-        return lambda obs: act_teacher(obs, stochastic_output=False)
+        return lambda obs: policy.act_teacher(obs, stochastic_output=False)
     return policy
 
 
@@ -113,14 +107,16 @@ def main() -> None:
         env.close()
         return
 
-    policy = _select_policy(runner.get_inference_policy(device=env.unwrapped.device), args_cli.policy_role)
+    policy = runner.get_inference_policy(device=env.unwrapped.device)
+    act = _select_policy(policy, args_cli.policy_role)
 
     obs = env.get_observations()
     step = 0
     while simulation_app.is_running():
         with torch.inference_mode():
-            actions = policy(obs)
-            obs, _, _, _ = env.step(actions)
+            actions = act(obs)
+            obs, _, dones, _ = env.step(actions)
+            policy.reset(dones)  # recurrent (depth) policies drop the hidden state of finished episodes
         step += 1
         if args_cli.steps is not None and step >= args_cli.steps:
             break

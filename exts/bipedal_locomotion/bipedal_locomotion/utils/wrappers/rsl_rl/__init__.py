@@ -15,6 +15,8 @@ from .rl_cfg import (
     RslRlModelCfg,
     RslRlOnPolicyRunnerCfg,
     RslRlPpoAlgorithmCfg,
+    RslRlRepresentationVelocityModelCfg,
+    RslRlRepresentationVelocityTeacherStudentPpoAlgorithmCfg,
 )
 from .runner import WheeledLeggedVelocityOnPolicyRunner
 from .vecenv_wrapper import (
@@ -28,6 +30,8 @@ __all__ = [
     "RslRlModelCfg",
     "RslRlOnPolicyRunnerCfg",
     "RslRlPpoAlgorithmCfg",
+    "RslRlRepresentationVelocityModelCfg",
+    "RslRlRepresentationVelocityTeacherStudentPpoAlgorithmCfg",
     "RslRlVecEnvWrapper",
     "WheeledLeggedRslRlVecEnvWrapper",
     "WheeledLeggedVelocityOnPolicyRunner",

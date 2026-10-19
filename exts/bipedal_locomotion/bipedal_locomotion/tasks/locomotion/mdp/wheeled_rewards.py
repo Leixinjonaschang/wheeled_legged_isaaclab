@@ -195,40 +195,34 @@ def base_ang_vel_xy_l2(
 def base_height_l2(
     env: ManagerBasedRLEnv,
     target_height: float,
+    sensor_cfg: SceneEntityCfg,
     asset_cfg: SceneEntityCfg = _ROBOT,
-    sensor_cfg: SceneEntityCfg | None = None,
     terrain_quantile: float = 0.5,
     deadband: float = 0.0,
 ) -> torch.Tensor:
-    """Penalise base-height error outside a deadband, relative to a height-scan quantile when given.
+    """Penalise base-height error outside a deadband, relative to a quantile of the height scan's hits.
 
     The quantile (mjlab ``terrain_sample="quantile"``) is robust to sparse deep holes such as
     stepping-stone pits.
     """
-    base_height = env.scene[asset_cfg.name].data.root_link_pos_w[:, 2]
-    if sensor_cfg is not None:
-        hit_z = env.scene[sensor_cfg.name].data.ray_hits_w[..., 2]
-        base_height = base_height - ground_height_quantile(hit_z, torch.isfinite(hit_z), terrain_quantile)
+    hit_z = env.scene[sensor_cfg.name].data.ray_hits_w[..., 2]
+    ground_z = ground_height_quantile(hit_z, torch.isfinite(hit_z), terrain_quantile)
+    base_height = env.scene[asset_cfg.name].data.root_link_pos_w[:, 2] - ground_z
     return base_height_error_sq(base_height, target_height, deadband)
 
 
 def upright(
     env: ManagerBasedRLEnv,
     std: float,
+    terrain_sensor_cfg: SceneEntityCfg,
     asset_cfg: SceneEntityCfg = _ROBOT,
-    terrain_sensor_cfg: SceneEntityCfg | None = None,
 ) -> torch.Tensor:
-    """Reward keeping the base upright: aligned with the terrain normal fitted to a height scan if
-    given, else with world up."""
+    """Reward keeping the base aligned with the terrain normal fitted to a height scan."""
     asset = env.scene[asset_cfg.name]
     ids = asset_cfg.body_ids
     body_quat_w = asset.data.root_link_quat_w if isinstance(ids, slice) else asset.data.body_link_quat_w[:, ids[0]]
-    if terrain_sensor_cfg is None:
-        up_w = torch.zeros_like(body_quat_w[:, 1:])
-        up_w[:, 2] = 1.0
-    else:
-        up_w = terrain_normal_from_points(*hit_points_with_mask(env, (terrain_sensor_cfg.name,)))
-    xy_squared = torch.sum(torch.square(quat_apply_inverse(body_quat_w, up_w)[:, :2]), dim=1)
+    normal_w = terrain_normal_from_points(*hit_points_with_mask(env, (terrain_sensor_cfg.name,)))
+    xy_squared = torch.sum(torch.square(quat_apply_inverse(body_quat_w, normal_w)[:, :2]), dim=1)
     return torch.exp(-xy_squared / std**2)
 
 

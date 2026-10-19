@@ -115,15 +115,13 @@ def out_of_terrain_bounds(
 ) -> torch.Tensor:
     """Truncate once the robot has left the generated sub-terrain grid by more than ``margin``.
 
-    Leaving the terrain is not a failure, so configure it with ``time_out=True``. All-false for a plane.
+    Leaving the terrain is not a failure, so configure it with ``time_out=True``.
     """
     terrain = env.scene.terrain
-    generator_cfg = getattr(terrain.cfg, "terrain_generator", None)
-    if generator_cfg is None or getattr(terrain, "terrain_origins", None) is None:
-        return torch.zeros(env.num_envs, device=env.device, dtype=torch.bool)
+    size = terrain.cfg.terrain_generator.size
     # The realised grid shape: curriculum mode can override the configured column count.
     num_rows, num_cols = terrain.terrain_origins.shape[:2]
     root_xy_w = env.scene[asset_cfg.name].data.root_link_pos_w[:, :2]
-    limit_x = 0.5 * num_rows * generator_cfg.size[0] + margin
-    limit_y = 0.5 * num_cols * generator_cfg.size[1] + margin
+    limit_x = 0.5 * num_rows * size[0] + margin
+    limit_y = 0.5 * num_cols * size[1] + margin
     return (root_xy_w[:, 0].abs() > limit_x) | (root_xy_w[:, 1].abs() > limit_y)

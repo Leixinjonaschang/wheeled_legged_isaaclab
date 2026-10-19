@@ -1,10 +1,7 @@
-"""ONNX export helpers and the sim-to-real deployment metadata contract.
+"""ONNX export metadata: the sim-to-real deployment contract (mjlab ``get_wheeled_legged_metadata``).
 
-The exported ONNX file carries the joint order, action scales, default joint
-positions and observation term names that the deployment runtime must reproduce
-exactly. Deployment should read these from the ONNX metadata rather than
-hard-coding them; see ``docs/deployment-scale-notes.md`` in the mjlab task
-repository for the layout this mirrors.
+The deploy runtime (``wf_tron1b_deploy``) validates these fields, so they are written as mjlab
+writes them: same keys, same serialisation, joint-indexed values in MJCF joint order.
 """
 
 from __future__ import annotations
@@ -13,15 +10,20 @@ from typing import TYPE_CHECKING, Any
 
 import onnx
 import torch
+from rsl_rl.models import DepthRepresentationVelocityActorCritic, RepresentationVelocityActorCritic
 
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
 
 
-def list_to_csv_str(arr: list, *, decimals: int = 6, delimiter: str = ",") -> str:
-    """Convert a list to a CSV string, formatting numbers to a fixed precision."""
+def list_to_csv_str(arr: list, *, decimals: int = 3, delimiter: str = ",", sub_delimiter: str = ";") -> str:
+    """Fixed-precision CSV; nested sequences (per-dim scales, clip ranges) are joined with ``sub_delimiter``."""
     fmt = f"{{:.{decimals}f}}"
-    return delimiter.join(fmt.format(x) if isinstance(x, (int, float)) else str(x) for x in arr)
+
+    def scalar(x) -> str:
+        return fmt.format(x) if isinstance(x, (int, float)) else str(x)
+
+    return delimiter.join(sub_delimiter.join(map(scalar, x)) if isinstance(x, (list, tuple)) else scalar(x) for x in arr)
 
 
 def attach_metadata_to_onnx(onnx_path: str, metadata: dict[str, Any]) -> None:
@@ -35,113 +37,55 @@ def attach_metadata_to_onnx(onnx_path: str, metadata: dict[str, Any]) -> None:
     onnx.save(model, onnx_path)
 
 
-def _action_term_joint_names(action_term) -> list[str]:
-    """Resolved joint names for an action term, in the term's own action order."""
-    for attr in ("_joint_names", "joint_names"):
-        names = getattr(action_term, attr, None)
-        if names:
-            return list(names)
-    raise AttributeError(
-        f"Action term {type(action_term).__name__} exposes neither `_joint_names` nor "
-        "`joint_names`; the deployment metadata cannot record which joint each action "
-        "drives. Update this helper for the installed Isaac Lab version."
-    )
-
-
-def _action_term_scales(action_term) -> list[float]:
-    """Per-dimension action scale, broadcast to the term's action dimension."""
-    scale = getattr(action_term, "_scale", None)
-    if scale is None:
-        scale = getattr(action_term, "scale", 1.0)
-    if isinstance(scale, torch.Tensor):
-        # Stored as [num_envs, action_dim] when resolved per joint.
-        flat = scale[0] if scale.ndim > 1 else scale
-        return [float(v) for v in flat.detach().cpu().tolist()]
-    return [float(scale)] * action_term.action_dim
-
-
-def _joint_gains(robot) -> tuple[list[float], list[float]]:
-    """Per-joint drive stiffness and damping in the articulation's joint order."""
-    stiffness = getattr(robot.data, "joint_stiffness", None)
-    damping = getattr(robot.data, "joint_damping", None)
-    if stiffness is None or damping is None:
-        raise AttributeError(
-            "ArticulationData exposes neither `joint_stiffness` nor `joint_damping`; the "
-            "deployment metadata cannot record the drive gains. Update this helper for the "
-            "installed Isaac Lab version."
-        )
-    return (
-        [float(v) for v in stiffness[0].detach().cpu().tolist()],
-        [float(v) for v in damping[0].detach().cpu().tolist()],
-    )
+def _plain(value):
+    return value.tolist() if isinstance(value, torch.Tensor) else value
 
 
 def get_wheeled_legged_metadata(env: ManagerBasedRLEnv, run_path: str, policy=None) -> dict[str, Any]:
-    """Build the deployment metadata for a WF-TRON1B policy.
+    """Deployment metadata for a WF-TRON1B policy: mixed leg-position / wheel-velocity actions and the
+    proprioceptive observation terms the deployed student consumes."""
+    from bipedal_locomotion.tasks.locomotion.cfg.WF_TRON1B.constants import MJCF_JOINT_NAMES  # avoids an import cycle
 
-    Handles *mixed* position / velocity action terms: unlike a uniformly
-    position-controlled robot, the action vector here is a concatenation of a
-    6-dimensional leg-position term (scale 0.5, offset by the default joint position)
-    and a 2-dimensional wheel-velocity term (scale 10.0, no offset). The per-dimension
-    ``action_names`` / ``action_target_names`` / ``action_scale`` lists make that split
-    explicit to the deployment side.
-
-    The observation term names are emitted for whichever proprioceptive group the
-    policy class actually consumes, so a student policy does not advertise the
-    teacher's privileged observations.
-    """
     robot = env.scene["robot"]
+    joint_ids = [robot.joint_names.index(name) for name in MJCF_JOINT_NAMES]
 
-    action_names: list[str] = []
-    action_target_names: list[str] = []
-    action_scales: list[float] = []
-    for action_name in env.action_manager.active_terms:
-        term = env.action_manager.get_term(action_name)
-        action_names.extend([action_name] * term.action_dim)
-        action_target_names.extend(_action_term_joint_names(term))
-        action_scales.extend(_action_term_scales(term))
+    action_names, action_target_names, action_scales = [], [], []
+    for name in env.action_manager.active_terms:
+        term = env.action_manager.get_term(name)
+        action_names += [name] * term.action_dim
+        action_target_names += list(term._joint_names)
+        scale = _plain(term._scale)
+        action_scales += scale[0] if isinstance(scale, list) else [float(scale)] * term.action_dim
 
-    joint_stiffness, joint_damping = _joint_gains(robot)
-
-    obs_terms = env.observation_manager.active_terms
-    proprio_group = "actor" if "actor" in obs_terms else "proprio_history"
-
+    obs_names = env.observation_manager.active_terms["proprio_history"]
+    obs_cfgs = env.observation_manager._group_obs_term_cfgs["proprio_history"]
     metadata: dict[str, Any] = {
         "run_path": run_path,
-        "joint_names": list(robot.joint_names),
-        "joint_stiffness": joint_stiffness,
-        "joint_damping": joint_damping,
-        "default_joint_pos": [float(v) for v in robot.data.default_joint_pos[0].detach().cpu().tolist()],
+        "joint_names": list(MJCF_JOINT_NAMES),
+        # Nominal (not randomised) drive gains. MuJoCo stores a velocity servo's kv as its "stiffness"
+        # too, so mjlab reports the wheels' stiffness as 0.5; PhysX's velocity drive has stiffness 0.
+        "joint_stiffness": robot.data.default_joint_stiffness[0, joint_ids].tolist(),
+        "joint_damping": robot.data.default_joint_damping[0, joint_ids].tolist(),
+        "default_joint_pos": robot.data.default_joint_pos[0, joint_ids].tolist(),
         "command_names": list(env.command_manager.active_terms),
-        "observation_names": list(obs_terms[proprio_group]),
+        "observation_names": obs_names,
+        "observation_terms_scale": [1.0 if cfg.scale is None else _plain(cfg.scale) for cfg in obs_cfgs],
+        "observation_terms_flatten_history_dim": [cfg.flatten_history_dim for cfg in obs_cfgs],
+        "observation_terms_history_length": [cfg.history_length for cfg in obs_cfgs],
+        "observation_terms_clip": [[-float("inf"), float("inf")] if cfg.clip is None else list(cfg.clip) for cfg in obs_cfgs],
         "action_names": action_names,
         "action_target_names": action_target_names,
         "action_scale": action_scales,
     }
-
-    # Representation policies take history (and optionally a command) as separate ONNX
-    # inputs, so record the input names and the history layout. `oldest_to_newest` is a
-    # contract with the observation manager's history buffer; `tests/` pins it.
-    policy_cls = type(policy).__name__ if policy is not None else ""
-    if policy_cls == "RepresentationActorCritic":
-        history_cfg = env.cfg.observations.actor_history
-        metadata.update(
-            {
-                "policy_input_names": ["student_history"],
-                "student_observation_names": list(obs_terms["actor_history"]),
-                "student_history_length": str(history_cfg.history_length),
-                "student_history_flatten_dim": str(history_cfg.flatten_history_dim).lower(),
-                "student_history_order": "oldest_to_newest",
-            }
-        )
-    elif "RepresentationVelocity" in policy_cls:
+    if isinstance(policy, RepresentationVelocityActorCritic):
+        depth = isinstance(policy, DepthRepresentationVelocityActorCritic)
         history_cfg = env.cfg.observations.proprio_history
         metadata.update(
             {
-                "policy_input_names": ["proprio_history", "actor_command"],
-                "policy_output_names": ["actions", "predicted_lin_vel"],
-                "student_observation_names": list(obs_terms["proprio_history"]),
-                "command_observation_names": list(obs_terms["actor_command"]),
+                "policy_input_names": ["proprio_history", "actor_command"] + (["depth", "hidden_state_in"] if depth else []),
+                "policy_output_names": ["actions", "predicted_lin_vel"] + (["hidden_state_out"] if depth else []),
+                "student_observation_names": obs_names,
+                "command_observation_names": env.observation_manager.active_terms["actor_command"],
                 "student_history_length": str(history_cfg.history_length),
                 "student_history_flatten_dim": str(history_cfg.flatten_history_dim).lower(),
                 "student_history_order": "oldest_to_newest",
