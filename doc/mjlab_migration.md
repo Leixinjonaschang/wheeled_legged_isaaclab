@@ -77,10 +77,14 @@
 | D5 | 地形课程语义 | 按 mjlab：每种子地形恰好一列、行难度 `row/(rows-1)`、按 proportion（最大余数法）把 env 分配到列；实现为 `ColumnPerTerrainGenerator` + `ProportionalTerrainImporter` | Isaac Lab 默认按 proportion 分配列、env 均分、难度带随机抖动，三点都与 mjlab 不同，平地列占比会从 28% 变成 50%（已实测 28.05%）。 |
 | D6 | 子地形实现 | 除平地（`MeshPlaneTerrainCfg`）外全部按 mjlab 几何重写，包括 heightfield 类 | Isaac Lab 同名内置地形在台阶数、障碍采样、hfield 网格间距（0.15 vs 0.1538 m）、竖墙修正上都与 mjlab 不同；4 种 box 地形 Isaac Lab 没有。用 mjlab 自己的随机抽样喂给移植函数，高度网格误差 ≤1e-7 m。 |
 | D23 | 地形缓存与随机种子 | `use_cache=False`、`seed=None`（与 mjlab 相同，每次运行重新生成） | 50×20 网格生成 + 导入约 12 s。 |
+| D24 | 奖励/终止项写的 `Metrics/*` | 先暂存在 env 上，由 RSL-RL wrapper 在 step 后并入 `extras["log"]` | Isaac Lab 在任意 env reset 时重建 `extras["log"]`（mjlab 只在 step 开头清），否则这些指标几乎每步都会被丢掉。只影响日志。 |
+| D25 | 非法接触的粒度 | 按 body 统计，因此膝部 `wheel_motor` 碰撞体也算非法接触 | Isaac Lab 接触传感器按 body 不按 geom；mjlab 中这两个 geom 不在任何接触组里。 |
+| D26 | "接触"的判定 | 地形接触力 > 1 N（与 air time 用同一阈值） | mjlab 用"存在接触点"（`found > 0`）；PhysX 没有等价量。 |
+| D27 | 力矩 / 功率类奖励的力矩来源 | Isaac Lab 隐式执行器的 `applied_torque` 估计 | MuJoCo 用 `actuator_force` / `qfrc_actuator`；PhysX 不暴露隐式驱动的实际力矩。 |
 | D7 | 深度相机实现 | 待 spike（TiledCamera vs RayCasterCamera） | mjlab 渲染 geom group 0/1（地形 + 机器人可视 mesh），TiledCamera 才能看到机器人自身；RayCasterCamera 快但只看地形。 |
 | D8 | 默认 logger | tensorboard | 本仓库惯例；mjlab 默认 wandb（project `mjlab`）。命令行 `--logger wandb` 可切换。 |
 | D9 | `num_envs` | 4096 | 与 mjlab 默认一致（旧 port 为 2048）。 |
-| D10 | 接触检测 | 轮子/非法接触只统计与地形的接触力；self-collision 单独统计机器人自身接触 | mjlab 的接触传感器显式过滤 `secondary=terrain` / 自身子树。 |
+| D10 | 接触检测 | 一个覆盖全部 9 个 link 的接触传感器，按地形 mesh 过滤：force matrix = 地形接触（轮子 / 非法接触），net − matrix = 机器人自身接触（self-collision），历史 4 个物理子步 | mjlab 的接触传感器显式过滤 `secondary=terrain` / 自身子树；已运行时验证过滤与自碰撞分离正确。 |
 | D11 | 编码器偏差语义 | 从位置目标中减去偏差，观测用真实关节角 | mjlab `joint_pos_rel(biased=False)`。 |
 | D12 | 训练无关的 mjlab 部件 | 不迁移：`prepare_quantities`、`clear_non_finite_sim_data`、`mean_action_acc` metric、play 时的 debug 可视化、MuJoCo solver 参数（iterations/ccd/nconmax） | 无 PhysX 对应物或不影响训练。 |
 | D13 | `init_velocity_prob`、零权重的 `heading_progress` | 删除 | 目标任务中都不生效（0），mjlab 已删 `heading_progress`。 |
