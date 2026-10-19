@@ -76,7 +76,7 @@
 | D4 | `leg_joint_torque` 惩罚哪些关节？ | 全部 8 个执行器（腿+轮） | mjlab 的 `SceneEntityCfg(joint_names=腿)` 不会解析 `actuator_ids`（保持 `slice(None)`），`joint_torques_l2` 实际对所有执行器求和；论文 run 的 `params/env.yaml` 已确认。忠实复现。 |
 | D5 | 地形课程语义 | 按 mjlab：每种子地形恰好一列、行难度 `row/(rows-1)`、按 proportion（最大余数法）把 env 分配到列；实现为 `ColumnPerTerrainGenerator` + `ProportionalTerrainImporter` | Isaac Lab 默认按 proportion 分配列、env 均分、难度带随机抖动，三点都与 mjlab 不同，平地列占比会从 28% 变成 50%（已实测 28.05%）。 |
 | D6 | 子地形实现 | 除平地（`MeshPlaneTerrainCfg`）外全部按 mjlab 几何重写，包括 heightfield 类 | Isaac Lab 同名内置地形在台阶数、障碍采样、hfield 网格间距（0.15 vs 0.1538 m）、竖墙修正上都与 mjlab 不同；4 种 box 地形 Isaac Lab 没有。用 mjlab 自己的随机抽样喂给移植函数，高度网格误差 ≤1e-7 m。 |
-| D7 | 深度相机实现 | 待 spike（TiledCamera vs RayCasterCamera） | mjlab 渲染 geom group 0/1（地形 + 机器人可视 mesh），TiledCamera 才能看到机器人自身；RayCasterCamera 快但只看地形。 |
+| D7 | 深度相机实现 | `RayCasterCamera`（地形）+ 对机器人自身轮子/膝部可视 mesh 的射线投射，逐像素取 min；只在 30 Hz 采样步计算 | mjlab 的相机本身就是对 geom group 0/1 的 BVH 射线投射：用训好的 OursGP 实测 27% 的帧能看到自己的轮子，必须复现。该实现与 mjlab 渲染逐像素一致（机器人掩码 IoU=1.000，深度误差 ≤1.3e-5 m）；4096 env 下每迭代约 +5%。TiledCamera 在本机 Isaac Sim 5.1 的 RTX 启动即段错误，且在共享 stage 上会看到相邻 env 的机器人。 |
 | D8 | 默认 logger | tensorboard | 本仓库惯例；mjlab 默认 wandb（project `mjlab`）。命令行 `--logger wandb` 可切换。 |
 | D9 | `num_envs` | 4096 | 与 mjlab 默认一致（旧 port 为 2048）。 |
 | D10 | 接触检测 | 一个覆盖全部 9 个 link 的接触传感器，按地形 mesh 过滤：force matrix = 地形接触（轮子 / 非法接触），net − matrix = 机器人自身接触（self-collision），历史 4 个物理子步 | mjlab 的接触传感器显式过滤 `secondary=terrain` / 自身子树；已运行时验证过滤与自碰撞分离正确。 |
