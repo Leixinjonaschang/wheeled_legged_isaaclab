@@ -137,7 +137,6 @@ def wheel_roughness_gate(
     return smoothstep_gate(stats.foot_roughness, gate_min, gate_max)
 
 
-
 class AsyncDepthBuffer(ManagerTermBase):
     """mjlab's ``async_depth_buffer``: the depth camera on a capture clock with a per-env system delay.
 

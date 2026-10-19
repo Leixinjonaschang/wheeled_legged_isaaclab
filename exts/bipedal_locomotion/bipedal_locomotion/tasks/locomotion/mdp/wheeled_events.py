@@ -198,7 +198,6 @@ def randomize_com_offset(
     state.com_offset[env_ids[:, None], body_ids.to(env.device)] = offset
 
 
-
 def randomize_depth_camera(
     env: ManagerBasedRLEnv,
     env_ids: torch.Tensor | None,
@@ -220,6 +219,7 @@ def randomize_depth_camera(
         pitch=torch.empty(count, device=env.device).uniform_(*pitch_range),
         fovy_deg=torch.empty(count, device=env.device).uniform_(*fovy_range_deg),
     )
+
 
 def randomize_terrain(env: ManagerBasedRLEnv, env_ids: torch.Tensor | None) -> None:
     """Respawn on a randomly chosen sub-terrain patch.
