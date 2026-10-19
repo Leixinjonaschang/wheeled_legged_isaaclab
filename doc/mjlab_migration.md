@@ -52,8 +52,21 @@
   API 不同，不用。
 - 自动化运行时通过 `OMNI_KIT_ACCEPT_EULA=YES` 接受 Omniverse EULA（机器上已在使用 Isaac Sim）。
 - 没有接受 Anaconda channel ToS（其商业条款对大公司有约束），改用 uv。
+- 本机缺 `libGLU.so.1`，Isaac Sim 在加载 MDL 材质（地形）时会卡死在 100% CPU。用户态解决：从
+  `libglu1-mesa` deb 解出库放在 `/home/ubuntu/venvs/wl_isaaclab/extra_libs`，运行时加
+  `LD_LIBRARY_PATH=/home/ubuntu/venvs/wl_isaaclab/extra_libs:$LD_LIBRARY_PATH`（有 root 时直接
+  `apt install libglu1-mesa` 即可）。
 
-## 5. 决策记录（值得问 owner 的）
+## 5. 验证方法
+
+1. 纯 torch 的 kernel 与 mjlab 参考实现逐项数值对比（`tests/`，无需 Isaac Sim）。
+2. 参数对齐：以 mjlab 论文 run 保存的 `params/env.yaml` / `agent.yaml` 为准逐项核对。
+3. 运行时 smoke：各观测组宽度、所有奖励/终止项有限、接触/DR 读回与记录一致。
+4. sim2sim：把 mjlab 训好的 OursGP checkpoint（`logs/exp_ckpt/ckpt_with_dyn_ctx/model_29999_ours_seed*.pt`）
+   直接放进 Isaac Lab 环境运行，检验观测 / 动作 / 深度图约定是否一致。
+5. 短训练：与 mjlab 训练曲线（`logs/paper_train_logs/ours_seed*`；BlindGP 需另跑 mjlab 参考）在相同迭代数对比。
+
+## 6. 决策记录（值得问 owner 的）
 
 | # | 问题 | 默认决策 | 理由 / 影响 |
 |---|---|---|---|
@@ -71,5 +84,11 @@
 | D12 | 训练无关的 mjlab 部件 | 不迁移：`prepare_quantities`、`clear_non_finite_sim_data`、`mean_action_acc` metric、play 时的 debug 可视化、MuJoCo solver 参数（iterations/ccd/nconmax） | 无 PhysX 对应物或不影响训练。 |
 | D13 | `init_velocity_prob`、零权重的 `heading_progress` | 删除 | 目标任务中都不生效（0），mjlab 已删 `heading_progress`。 |
 | D14 | done 环境的 `applied_actions` | 使用 reset 前快照（`terminal_applied_action`） | 与 mjlab wrapper 一致，latent dynamics 训练用到。 |
-| D15 | 是否提交生成的 WF_TRON1B USD | 待 USD 分支确定 | 默认提交（开箱即训），converter 脚本作为出处。 |
+| D15 | 是否提交生成的 WF_TRON1B USD | 提交（28.9 MB，可由 converter 逐字节复现） | 开箱即训；link 平铺在 `/robot/<link>`，碰撞体对渲染隐藏（与 mjlab 深度相机只看可视 geom 一致）。 |
 | D16 | push 到远端 | 不 push | 对外操作，留给 owner。 |
+| D17 | 轮子摩擦 DR 的实现 | 合成一个 event：每 env 一次共享采样 U(0.45,1.1) + 每轮独立 U(-0.04,0.04) | 分布与 mjlab 的两个 event 完全等价；特权观测的归一化范围仍是两者之和 [0.41,1.14]。 |
+| D18 | `dynamics_context` 的来源 | startup 时记录采样值并据此构造，不每步从 PhysX 读回；布局与归一化逐项对齐 mjlab（MJCF 顺序） | 只在 startup 随机化，记录值与 PhysX 读回值一致（已运行时验证）；每步读回代价高。惯量 27 维 = 每个 body 的质量比 ×3（只随机 α 时与 mjlab 排序后的主惯量比严格相等）。 |
+| D19 | MJCF 被动关节阻尼 0.01 | 放进 PhysX `viscous_friction`，PD 增益 DR 只缩放驱动 kp/kv | 与 mjlab 只缩放执行器 kp/kv 一致。 |
+| D20 | MuJoCo 执行器 → PhysX 映射 | kp/kv → drive stiffness/damping；`frictionloss` → static+dynamic friction；`forcerange` → `effort_limit_sim`；不设关节速度上限 | 实测 Isaac Sim 5.1 的关节摩擦字段为与载荷无关的力矩，语义与 MuJoCo 一致；旧 cfg 的 `velocity_limit` 实际不生效，已删。 |
+| D21 | 刚体最大角速度 | `max_angular_velocity` = 100 rad/s | 原 1000 是 deg/s（17.5 rad/s），会把轮速卡在动作可达的 20 rad/s 以下；MuJoCo 无此上限。 |
+| D22 | PhysX 轮速稳态偏差 | 接受 | 带载时 PhysX 轮速比目标高约 +0.3%~+2.3%（MuJoCo −0.15%），调 solver/armature 无法消除，远小于 ±20% 的增益 DR。 |
