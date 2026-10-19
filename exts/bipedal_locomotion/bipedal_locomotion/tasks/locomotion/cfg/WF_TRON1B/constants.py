@@ -112,10 +112,39 @@ ACTION_DELAY_RANGE_S = (0.0, 0.02)
 ACTION_DELAY_RESAMPLING_TIME_S = 5.0
 ACTION_DELAY_GROUP = "base_actions"
 
-# Domain randomisation.
-WHEEL_FRICTION_RANGE = (0.3, 1.2)
+# Domain randomisation, sampled once per environment at startup (mjlab ranges).
+WHEEL_FRICTION_RANGE = (0.45, 1.1)  # one draw shared by both wheels ...
+WHEEL_FRICTION_DIFFERENCE_RANGE = (-0.04, 0.04)  # ... plus an independent per-wheel offset
+MASS_INERTIA_ALPHA_RANGE = (0.5 * math.log(0.8), 0.5 * math.log(1.2))  # mass and inertia scale by exp(2 alpha)
 ENCODER_BIAS_RANGE = (-0.015, 0.015)
-BASE_COM_RANGE = ((-0.025, 0.025), (-0.025, 0.025), (-0.03, 0.03))
+STIFFNESS_SCALE_RANGE = (0.8, 1.2)
+DAMPING_SCALE_RANGE = (0.8, 1.2)
+BASE_COM_RANGE = (-0.03, 0.03)  # per axis
+LINK_COM_RANGE = (-0.015, 0.015)  # per axis, every non-base body
+# MJCF <joint damping>: folded into the leg drives' damping and, as in mjlab, not randomised.
+JOINT_PASSIVE_DAMPING = 0.01
+# MJCF (depth-first) order, which mjlab's privileged DR observation is laid out in.
+MJCF_JOINT_NAMES = (
+    "abad_L_Joint",
+    "hip_L_Joint",
+    "knee_L_Joint",
+    "wheel_L_Joint",
+    "abad_R_Joint",
+    "hip_R_Joint",
+    "knee_R_Joint",
+    "wheel_R_Joint",
+)
+MJCF_BODY_NAMES = (
+    "base_Link",
+    "abad_L_Link",
+    "hip_L_Link",
+    "knee_L_Link",
+    "wheel_L_Link",
+    "abad_R_Link",
+    "hip_R_Link",
+    "knee_R_Link",
+    "wheel_R_Link",
+)
 
 # Observation noise, matching the mjlab task.
 NOISE_BASE_ANG_VEL = 0.2

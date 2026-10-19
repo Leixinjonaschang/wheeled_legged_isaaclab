@@ -49,7 +49,7 @@ from bipedal_locomotion.utils.wrappers.rsl_rl import WheeledLeggedRslRlVecEnvWra
 
 # Widths the runner configs and the exported deployment metadata assume.
 EXPECTED_ACTOR_DIM = 31
-EXPECTED_DYNAMICS_CONTEXT_DIM = 13
+EXPECTED_DYNAMICS_CONTEXT_DIM = 87
 EXPECTED_HISTORY_LENGTH = 5
 EXPECTED_NUM_ACTIONS = 8
 

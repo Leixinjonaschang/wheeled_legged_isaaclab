@@ -14,8 +14,7 @@ import torch
 from bipedal_locomotion.utils.math import quat_apply_inverse
 from isaaclab.managers import SceneEntityCfg
 
-from .domain_randomization import get_dr_state
-from .kernels import encode_contact_forces, normalize_to_unit_range, terrain_roughness_from_height_samples
+from .kernels import encode_contact_forces, terrain_roughness_from_height_samples
 from .sensor_utils import contact_state, stack_clearance_samples
 
 if TYPE_CHECKING:
@@ -23,7 +22,6 @@ if TYPE_CHECKING:
 
 __all__ = [
     "base_link_lin_vel",
-    "domain_randomization_delta_quantity",
     "terrain_height_scan",
     "terrain_roughness_indicator",
     "wheel_contact",
@@ -132,31 +130,3 @@ def terrain_roughness_indicator(
         grid_shape=grid_shape,
     )
     return stats.gate.unsqueeze(-1)
-
-
-def domain_randomization_delta_quantity(
-    env: ManagerBasedRLEnv,
-    wheel_friction_event: str = "wheel_friction",
-    encoder_bias_event: str = "encoder_bias",
-    base_com_event: str = "base_com",
-) -> torch.Tensor:
-    """The realised randomisation, normalised to [-1, 1]. Shape ``[B, 2 + num_joints + 3]``.
-
-    This is the privileged "what robot am I today" signal. Each quantity is normalised
-    against the range declared on its own event term rather than against a hard-coded
-    constant, so widening a randomisation range in the config cannot silently rescale
-    this observation out from under a trained encoder.
-    """
-    state = get_dr_state(env)
-
-    friction_range = env.event_manager.get_term_cfg(wheel_friction_event).params["friction_range"]
-    bias_range = env.event_manager.get_term_cfg(encoder_bias_event).params["bias_range"]
-    com_ranges = env.event_manager.get_term_cfg(base_com_event).params["com_range"]
-
-    friction = normalize_to_unit_range(state.wheel_friction, friction_range[0], friction_range[1])
-    encoder_bias = normalize_to_unit_range(state.encoder_bias, bias_range[0], bias_range[1])
-    com_delta = torch.stack(
-        [normalize_to_unit_range(state.base_com_delta[:, axis], *com_ranges[axis]) for axis in range(3)],
-        dim=1,
-    )
-    return torch.cat((friction, encoder_bias, com_delta), dim=1)
