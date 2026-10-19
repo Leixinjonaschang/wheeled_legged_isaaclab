@@ -96,5 +96,6 @@ class WF_TRON1B_RepTSLinVelDepthEnvCfg_PLAY(WF_TRON1B_RepTSLinVelDepthEnvCfg):
     def __post_init__(self):
         super().__post_init__()
         _apply_play_overrides(self)
+        # As mjlab: no camera calibration error and no depth system delay.
         self.events.depth_camera_calibration = None
         self.observations.depth_camera.depth_camera.params["system_delay_range_s"] = (0.0, 0.0)
