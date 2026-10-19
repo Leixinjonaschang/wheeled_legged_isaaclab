@@ -13,7 +13,7 @@
 > `192.168.2.65:8022/rl/poc/tron/tron2_open_source/tron2_rl_lab` 仅作为
 > LimX 内部开发使用的私有镜像。
 
-基于 [Isaac Lab](https://isaac-sim.github.io/IsaacLab/) 的 LimX **TRON2A** 双足机器人强化学习训练栈，使用 PPO 训练 locomotion 策略。本仓库专注于基础形态的平地（Flat）训练，支持 SF（sole-foot）与 WF（wheel-foot）两种机器人变体。
+基于 [Isaac Lab](https://isaac-sim.github.io/IsaacLab/) 的 LimX **WF-TRON1B** 轮足双足机器人（腿部位置控制、轮子速度控制）强化学习训练栈。仓库提供从 `wheeled_legged_mjlab` 迁移来的 teacher-student 速度跟踪任务：一个纯本体感知（blind）策略，和一个带深度相机、带 latent dynamics 预测的策略，均在生成的崎岖地形上训练。迁移与 mjlab 原实现的对应关系及其中的决策见 [`doc/mjlab_migration.md`](doc/mjlab_migration.md)。
 
 ## 许可与归属
 
@@ -88,17 +88,21 @@
 
 ```
 .
-├── exts/bipedal_locomotion/   # Isaac Lab extension：env/asset/MDP/robot cfg
-├── rsl_rl/                    # 项目内 vendored 的 rsl_rl fork（PPO + on-policy runner）
+├── exts/bipedal_locomotion/   # Isaac Lab extension：env/asset/MDP/sensor/terrain/robot cfg
+├── rsl_rl/                    # 项目内 vendored 的 rsl_rl fork（teacher-student representation PPO）
 ├── scripts/rsl_rl/            # 训练 / play 入口（train.py / play.py / cli_args.py）
+├── scripts/tools/             # MJCF -> USD 转换、冒烟 rollout
+├── tests/                     # 单元测试与 mjlab 对齐测试（无需 Isaac Sim）
+├── doc/                       # 迁移说明、媒体文件
 └── logs/                      # 训练日志与模型权重
 ```
 
 ## 环境要求
 
 - **Isaac Sim 5.1** + **Isaac Lab 2.3.1**
-- Python 3.10
+- Python 3.11
 - GPU（推荐 ≥ 12 GB 显存，4096 envs 训练）
+- `libGLU.so.1`（`apt install libglu1-mesa`）：缺少时 Isaac Sim 会在加载地形材质时卡死。
 
 ## 安装
 
@@ -119,52 +123,66 @@ pip install -e rsl_rl
 ### 1. 训练模型
 
 ```bash
-# === Solefoot (SF) ===
-python scripts/rsl_rl/train.py --task Isaac-Limx-SF-TRON2A-Blind-Flat-v0 --num_envs 4096 --headless
+# 纯本体感知的 teacher-student 策略
+python scripts/rsl_rl/train.py --task Isaac-Limx-WF-TRON1B-Velocity-Rough-RepTS-LinVel-BlindGP-v0 --headless
 
-# === Wheelfoot (WF) ===
-python scripts/rsl_rl/train.py --task Isaac-Limx-WF-TRON2A-Blind-Flat-v0 --num_envs 4096 --headless
+# 深度相机 + latent dynamics 预测的策略
+python scripts/rsl_rl/train.py --task Isaac-Limx-WF-TRON1B-Velocity-Rough-RepTS-LinVel-Depth-Predict-OursGP-v0 --headless
 ```
 
 *常用选项：*
-- `--checkpoint_path <path>`: 从某 .pt 恢复。
+- `--num_envs N`: 覆盖任务默认的 4096 个 env。
+- `--max_iterations N`: 覆盖 runner 默认的 30,000 次迭代。
+- `--logger wandb --log_project_name <project>`: 用 W&B 代替 TensorBoard 记录。
 - `--video`: 开启录像。
-- `--max_iterations N`: 覆盖最大迭代数。
 
-日志路径：`logs/rsl_rl/<experiment_name>/<timestamp>_<run_name>/`
+日志路径：`logs/rsl_rl/<experiment_name>/<timestamp>_<run_name>/`。每次保存 checkpoint 都会在 run 目录下同时导出 ONNX，并附带 `wf_tron1b_deploy` 部署代码会校验的元数据。
 
 ### 2. 运行推理 (Play)
 
-用 `-Play-v0` 后缀的任务 ID。Play cfg 使用更少 env、关闭域随机化、简化地形。
+用 `-Play-v0` 后缀的任务 ID：关闭观测噪声、动作延迟、外推、相机标定扰动和各课程，机器人在随机地形块上重生。
 
 ```bash
-# Solefoot (SF)
-python scripts/rsl_rl/play.py --task Isaac-Limx-SF-TRON2A-Blind-Flat-Play-v0 --num_envs 32
-
-# Wheelfoot (WF)
-python scripts/rsl_rl/play.py --task Isaac-Limx-WF-TRON2A-Blind-Flat-Play-v0 --num_envs 32
+python scripts/rsl_rl/play.py --task Isaac-Limx-WF-TRON1B-Velocity-Rough-RepTS-LinVel-BlindGP-Play-v0 \
+    --checkpoint_path <model.pt>
 ```
 
-*注意：* 默认加载最新 checkpoint，指定路径可用 `--checkpoint_path`。
+*选项：* `--policy_role teacher` 运行特权 teacher 而不是可部署的 student；`--export_onnx` 在 checkpoint 旁写出 `exported/policy.onnx` 后退出。
 
 ### 3. Resume 续训
 
-必须显式带 `--resume True` 才会加载 checkpoint。
+必须显式带 `--resume True` 才会加载 checkpoint。环境的步数计数器会一起恢复，课程从中断处继续。
 
 ```bash
 # 方式 A：直接给 .pt 路径（推荐）
-python scripts/rsl_rl/train.py --task Isaac-Limx-SF-TRON2A-Blind-Flat-v0 --resume True --checkpoint_path <path_to_model>
+python scripts/rsl_rl/train.py --task <task> --resume True --checkpoint_path <path_to_model>
 
 # 方式 B：按 run 名查找
-python scripts/rsl_rl/train.py --task Isaac-Limx-SF-TRON2A-Blind-Flat-v0 --resume True --load_run <run_name>
+python scripts/rsl_rl/train.py --task <task> --resume True --load_run <run_name>
 ```
 
 ## 机器人形态
 
-| 形态 | 末端 | task id 前缀 |
+| 形态 | 末端 | 驱动 | task id 前缀 |
+|---|---|---|---|
+| WF_TRON1B | wheel | 腿部位置控制 + 轮子速度控制 | `Isaac-Limx-WF-TRON1B-...` |
+| SF_TRON2A | sole foot (ankle pitch) | 位置控制 | *（仅保留资产，任务已移除）* |
+| WF_TRON2A | wheel | 位置控制 | *（仅保留资产，任务已移除）* |
+
+### 已注册任务
+
+| 任务 ID（play 时在 `-v0` 前加 `-Play`） | mjlab 原任务 | student 策略输入 |
 |---|---|---|
-| SF_TRON2A | sole foot (ankle pitch) | `Isaac-Limx-SF-TRON2A-...` |
-| WF_TRON2A | wheel | `Isaac-Limx-WF-TRON2A-...` |
+| `Isaac-Limx-WF-TRON1B-Velocity-Rough-RepTS-LinVel-BlindGP-v0` | `Mjlab-Velocity-Rough-WF-Tron1B-RepTS-LinVel-BlindGP` | 本体感知历史 + 指令 |
+| `Isaac-Limx-WF-TRON1B-Velocity-Rough-RepTS-LinVel-Depth-Predict-OursGP-v0` | `Mjlab-Velocity-Rough-WF-Tron1B-RepTS-LinVel-Depth-Predict-OursGP` | + d435 深度图（CNN + GRU）；latent dynamics 预测 |
+
+两个任务使用同一套生成地形（20 列：台阶、斜坡、障碍、随机起伏、随机方块、梅花桩、倾斜网格，与平地交错），并带地形等级课程。
+
+机器人 USD 由仓库内的 MJCF 生成并已提交；重新生成：
+
+```bash
+python scripts/tools/convert_wf_tron1b_mjcf.py --headless
+```
 
 ## 架构概览
 
@@ -176,11 +194,12 @@ python scripts/rsl_rl/train.py --task Isaac-Limx-SF-TRON2A-Blind-Flat-v0 --resum
 
 ### 任务 Wiring 流程
 
-以 `Isaac-Limx-SF-TRON2A-Blind-Flat-v0` 为例：
+以 `Isaac-Limx-WF-TRON1B-Velocity-Rough-RepTS-LinVel-BlindGP-v0` 为例：
 
-1. **Gym 注册**：在 `tasks/locomotion/robots/__init__.py` 中将环境配置与 PPO 配置绑定到任务 ID。
-2. **环境配置 (Env cfg)**：在 `tasks/locomotion/robots/limx_solefoot_tron2a_env_cfg.py` 中定义资产加载与 MDP 规则。
-3. **资产配置 (Asset cfg)**：在 `assets/config/solefoot_tron2a_cfg.py` 中指定内置的 USD 路径及执行器（Actuator）参数。
+1. **Gym 注册**：`tasks/locomotion/robots/__init__.py` 将任务 ID 绑定到 env cfg 类和 runner cfg 工厂函数。
+2. **环境配置 (Env cfg)**：`tasks/locomotion/robots/wf_tron1b_env_cfg.py`（训练 / play / 深度变体）基于 `tasks/locomotion/cfg/WF_TRON1B/wf_tron1b_base_env_cfg.py`（场景、观测、动作、指令、事件、奖励、终止、课程），可调参数集中在 `cfg/WF_TRON1B/constants.py`。
+3. **Runner 配置**：`tasks/locomotion/agents/wf_tron1b_rsl_rl_cfg.py`。
+4. **资产配置 (Asset cfg)**：`assets/config/wheelfoot_tron1b_cfg.py`（USD 路径与执行器参数）。
 
 ## MuJoCo 仿真与实机部署
 
@@ -265,7 +284,7 @@ git ls-files | grep -iE \
 端到端冒烟：
 
 ```bash
-python scripts/rsl_rl/train.py --task Isaac-Limx-SF-TRON2A-Blind-Flat-v0 \
+python scripts/rsl_rl/train.py --task Isaac-Limx-WF-TRON1B-Velocity-Rough-RepTS-LinVel-BlindGP-v0 \
   --num_envs 16 --headless --max_iterations 2
 ```
 
