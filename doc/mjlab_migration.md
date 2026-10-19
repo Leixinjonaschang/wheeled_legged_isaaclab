@@ -103,3 +103,4 @@
 | D31 | ONNX 元数据 | 与 mjlab `get_wheeled_legged_metadata` 同字段、同序列化（3 位小数、嵌套用 `;`），关节相关字段按 MJCF 关节顺序，轮子 stiffness 报 kv（与 MuJoCo gainprm 一致） | 部署仓库按这些字段做校验；导出的 BlindGP / OursGP ONNX 均通过部署仓库自己的 validator，同一 checkpoint 的输出与 mjlab 导出的 ONNX 一致。 |
 | D32 | 与 mjlab 的训练曲线对比口径 | 2048 env、同迭代数；终止项按"各原因占比"比较 | mjlab 4096 env 在这台共享 GPU 上 OOM（2048 env 已用 15 GB）；Isaac Lab 记录的是各终止项占比，mjlab 记录的是每次 reset 的计数。 |
 | D33 | sim2sim 中剩余的差异 | 记为仿真器间固有差异，不做修正 | 用 mjlab 训好的 OursGP：teacher 摔倒率 0.48 vs 0.46 次/env-min（持平），student 1.49 vs 0.79；同一 teacher 轨迹上 student 的潜变量/速度/粗糙度估计两边一致，固定位姿下深度（≤8.3e-6 m）与本体观测完全一致，故 student 差距是 MuJoCo 蒸馏出的 student 对 PhysX 动力学偏移更敏感的闭环效应。另：yaw 角速度跟踪误差 Isaac Lab 高约 20%（物理/接触模型差异）。 |
+| D34 | TRON2A 时代遗留的 MDP 代码 | 删除 `mdp/{observations,rewards,events,curriculums}.py`、gait command、`actuators/`（延迟执行器）和 `utils/math.py` 中只被它们使用的函数 | TRON2A 任务早已注销，这些代码无人使用；唯一与 WF-TRON1B 配置重名的 `generated_commands` 与 Isaac Lab 内置实现完全相同。需要时可从 git 历史恢复。 |
