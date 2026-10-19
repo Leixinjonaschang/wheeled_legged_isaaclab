@@ -1,6 +1,7 @@
-"""Startup domain randomisation (mjlab's set and order), recording what each event sampled.
+"""Startup domain randomisation (mjlab's set and order), recording what each event sampled, and the
+depth camera's per-reset calibration randomisation.
 
-Isaac Lab's stock randomisation writes into PhysX and keeps no record. Every event here also
+Isaac Lab's stock randomisation writes into PhysX and keeps no record. Every startup event here also
 stores its draw in :class:`~.domain_randomization.DomainRandomizationState`, which the
 privileged ``dynamics_context`` observation reads back.
 """
@@ -21,6 +22,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "randomize_com_offset",
+    "randomize_depth_camera",
     "randomize_encoder_bias",
     "randomize_mass_inertia",
     "randomize_pd_gains",
@@ -195,6 +197,29 @@ def randomize_com_offset(
     asset.root_physx_view.set_coms(coms, cpu_env_ids)
     state.com_offset[env_ids[:, None], body_ids.to(env.device)] = offset
 
+
+
+def randomize_depth_camera(
+    env: ManagerBasedRLEnv,
+    env_ids: torch.Tensor | None,
+    sensor_cfg: SceneEntityCfg,
+    position_range: tuple[float, float],
+    pitch_range: tuple[float, float],
+    fovy_range_deg: tuple[float, float],
+) -> None:
+    """mjlab's ``cam_pos`` / ``cam_quat`` (pitch) / ``cam_fovy`` reset events: per-environment calibration error.
+
+    Every axis of the mount position, the pitch about the robot's y axis and the vertical field of view are
+    offset from their nominal values by a fresh uniform draw (see ``SelfOccludingRayCasterCamera.perturb_mount``).
+    """
+    env_ids = _resolve_env_ids(env, env_ids)
+    count = len(env_ids)
+    env.scene[sensor_cfg.name].perturb_mount(
+        env_ids,
+        position=torch.empty(count, 3, device=env.device).uniform_(*position_range),
+        pitch=torch.empty(count, device=env.device).uniform_(*pitch_range),
+        fovy_deg=torch.empty(count, device=env.device).uniform_(*fovy_range_deg),
+    )
 
 def randomize_terrain(env: ManagerBasedRLEnv, env_ids: torch.Tensor | None) -> None:
     """Respawn on a randomly chosen sub-terrain patch.

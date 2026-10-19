@@ -12,8 +12,9 @@ from typing import TYPE_CHECKING
 import torch
 
 from bipedal_locomotion.utils.math import quat_apply_inverse
-from isaaclab.managers import SceneEntityCfg
+from isaaclab.managers import ManagerTermBase, ObservationTermCfg, SceneEntityCfg
 
+from .depth import DelayedFrameBuffer, normalize_depth
 from .kernels import encode_contact_forces, smoothstep_gate, terrain_roughness_from_height_samples
 from .sensor_utils import contact_state, stack_clearance_samples, terrain_forces
 
@@ -21,6 +22,7 @@ if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
 
 __all__ = [
+    "AsyncDepthBuffer",
     "base_link_lin_vel",
     "terrain_height_scan",
     "terrain_roughness_indicator",
@@ -134,3 +136,35 @@ def wheel_roughness_gate(
     )
     return smoothstep_gate(stats.foot_roughness, gate_min, gate_max)
 
+
+
+class AsyncDepthBuffer(ManagerTermBase):
+    """mjlab's ``async_depth_buffer``: the depth camera on a capture clock with a per-env system delay.
+
+    Frames are post-processed like mjlab's ``depth_image`` (left crop, misses read as far, clamp, scale to
+    [0, 1]); shape ``[B, 1, H, W - left_crop]``. The camera is only read on capture and reset-refill steps.
+    """
+
+    def __init__(self, cfg: ObservationTermCfg, env: ManagerBasedRLEnv):
+        super().__init__(cfg, env)
+        self._buffer = DelayedFrameBuffer()
+
+    def __call__(
+        self,
+        env: ManagerBasedRLEnv,
+        sensor_cfg: SceneEntityCfg,
+        capture_frequency_hz: float = 30.0,
+        system_delay_range_s: tuple[float, float] = (0.0, 0.0),
+        left_crop: int = 0,
+        depth_min_m: float = 0.2,
+        depth_max_m: float = 2.0,
+    ) -> torch.Tensor:
+        def capture() -> torch.Tensor:
+            depth = env.scene[sensor_cfg.name].data.output["distance_to_image_plane"][..., 0]
+            return normalize_depth(depth, left_crop, depth_min_m, depth_max_m).unsqueeze(1)
+
+        current_time_s = int(env.common_step_counter) * env.step_dt
+        return self._buffer(current_time_s, capture, capture_frequency_hz, system_delay_range_s)
+
+    def reset(self, env_ids: torch.Tensor | None = None) -> None:
+        self._buffer.reset(env_ids)
