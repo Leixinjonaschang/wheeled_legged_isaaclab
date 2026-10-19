@@ -138,12 +138,11 @@ def randomize_pd_gains(
     asset_cfg: SceneEntityCfg,
     stiffness_scale_range: tuple[float, float],
     damping_scale_range: tuple[float, float],
-    passive_damping: float = 0.0,
 ) -> None:
     """Scale servo gains from nominal, per joint: Kp of the position servos, Kd / Kv of all.
 
-    A position servo's drive damping is its kv plus the passive joint damping (exact, as its target
-    velocity is zero); like mjlab only the kv part is scaled. Both the PhysX drives and the actuator
+    Only the drive gains are scaled, as mjlab scales only the actuator kp / kv (the passive joint
+    damping is the drive-independent ``viscous_friction``). Both the PhysX drives and the actuator
     models are updated, since the latter's gains feed ``applied_torque``.
     """
     asset = env.scene[asset_cfg.name]
@@ -155,12 +154,11 @@ def randomize_pd_gains(
     position_servo = kp0 > 0.0  # velocity servos have no Kp
     kp_scale = torch.where(position_servo, torch.empty_like(kp0).uniform_(*stiffness_scale_range), 1.0)
     kd_scale = torch.empty_like(kd0).uniform_(*damping_scale_range)
-    passive = position_servo.float() * passive_damping
 
     stiffness = asset.data.joint_stiffness[env_ids].clone()
     damping = asset.data.joint_damping[env_ids].clone()
     stiffness[:, joint_ids] = kp0 * kp_scale
-    damping[:, joint_ids] = passive + (kd0 - passive) * kd_scale
+    damping[:, joint_ids] = kd0 * kd_scale
     for actuator in asset.actuators.values():
         ids = actuator.joint_indices
         actuator.stiffness[env_ids] = stiffness[:, ids]

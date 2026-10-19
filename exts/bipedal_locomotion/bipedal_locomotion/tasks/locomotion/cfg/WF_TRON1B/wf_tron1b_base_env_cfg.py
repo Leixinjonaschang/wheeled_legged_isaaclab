@@ -358,7 +358,6 @@ class EventsCfg:
             "asset_cfg": _ALL_JOINTS,
             "stiffness_scale_range": C.STIFFNESS_SCALE_RANGE,
             "damping_scale_range": C.DAMPING_SCALE_RANGE,
-            "passive_damping": C.JOINT_PASSIVE_DAMPING,
         },
     )
     base_com = EventTerm(

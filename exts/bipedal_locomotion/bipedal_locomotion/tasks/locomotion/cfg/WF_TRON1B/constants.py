@@ -121,8 +121,6 @@ STIFFNESS_SCALE_RANGE = (0.8, 1.2)
 DAMPING_SCALE_RANGE = (0.8, 1.2)
 BASE_COM_RANGE = (-0.03, 0.03)  # per axis
 LINK_COM_RANGE = (-0.015, 0.015)  # per axis, every non-base body
-# MJCF <joint damping>: folded into the leg drives' damping and, as in mjlab, not randomised.
-JOINT_PASSIVE_DAMPING = 0.01
 # MJCF (depth-first) order, which mjlab's privileged DR observation is laid out in.
 MJCF_JOINT_NAMES = (
     "abad_L_Joint",
