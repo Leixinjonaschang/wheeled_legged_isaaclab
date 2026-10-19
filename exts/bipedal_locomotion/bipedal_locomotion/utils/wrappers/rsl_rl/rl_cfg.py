@@ -154,3 +154,28 @@ class RslRlOnPolicyRunnerCfg(RslRlBaseRunnerCfg):
     """The critic configuration."""
     algorithm: RslRlPpoAlgorithmCfg = field(default_factory=RslRlPpoAlgorithmCfg)
     """The algorithm configuration."""
+
+
+@dataclass
+class RslRlRepresentationVelocityModelCfg(RslRlModelCfg):
+    """Velocity representation teacher-student actor-critic (actor and critic in one model)."""
+
+    encoder_hidden_dims: tuple[int, ...] = (512, 256, 128)
+    latent_dim: int = 64
+    normalize_latent: bool = True
+    class_name: str = "RepresentationVelocityActorCritic"
+
+
+@dataclass
+class RslRlRepresentationVelocityTeacherStudentPpoAlgorithmCfg(RslRlPpoAlgorithmCfg):
+    """PPO on the privileged latent plus student velocity-representation learning."""
+
+    student_learning_rate: float = 1.0e-3
+    num_student_substeps: int = 1
+    num_representation_epochs: int | None = None
+    num_representation_mini_batches: int | None = None
+    representation_chunk_length: int = 24
+    representation_loss_coef: float = 1.0
+    lin_vel_loss_coef: float = 1.0
+    roughness_loss_coef: float = 0.2
+    class_name: str = "RepresentationVelocityTeacherStudentPPO"
