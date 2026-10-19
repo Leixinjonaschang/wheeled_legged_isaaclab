@@ -92,9 +92,8 @@ class WF_TRON1B_RoughEnvCfg_PLAY(WF_TRON1B_RoughEnvCfg):
         self.events.randomize_terrain = EventTerm(func=wheeled_events.randomize_terrain, mode="reset", params={})
         generator = self.scene.terrain.terrain_generator
         if generator is not None:
-            generator.curriculum = True
+            generator.curriculum = True  # one column per sub-terrain
             generator.num_rows = 5
-            generator.num_cols = len(generator.sub_terrains)
             generator.border_width = 5.0
 
 
