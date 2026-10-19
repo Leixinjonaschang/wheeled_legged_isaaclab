@@ -70,7 +70,7 @@ def test_metadata_matches_mjlab_layout():
     meta = exporter.get_wheeled_legged_metadata(_env(), "local", object.__new__(RepresentationVelocityActorCritic))
 
     assert meta["joint_names"] == MJCF_JOINTS
-    assert meta["joint_stiffness"] == [40.0, 40.0, 40.0, 0.0, 40.0, 40.0, 40.0, 0.0]
+    assert meta["joint_stiffness"] == pytest.approx([40.0, 40.0, 40.0, 0.5, 40.0, 40.0, 40.0, 0.5])
     assert meta["joint_damping"] == pytest.approx([1.8, 1.8, 1.8, 0.5, 1.8, 1.8, 1.8, 0.5])
     assert meta["default_joint_pos"] == pytest.approx([0.0, 0.1, 0.0, 0.0, 0.0, 0.0, -0.2, 0.0])
     assert meta["observation_names"] == meta["student_observation_names"] == PROPRIO_TERMS

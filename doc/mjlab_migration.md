@@ -94,8 +94,12 @@
 | D22 | PhysX 轮速稳态偏差 | 接受 | 带载时 PhysX 轮速比目标高约 +0.3%~+2.3%（MuJoCo −0.15%），调 solver/armature 无法消除，远小于 ±20% 的增益 DR。 |
 | D23 | 地形缓存与随机种子 | `use_cache=False`、`seed=None`（与 mjlab 相同，每次运行重新生成） | 50×20 网格生成 + 导入约 12 s。 |
 | D24 | 奖励/终止项写的 `Metrics/*` | 先暂存在 env 上，由 RSL-RL wrapper 在 step 后并入 `extras["log"]` | Isaac Lab 在任意 env reset 时重建 `extras["log"]`（mjlab 只在 step 开头清），否则这些指标几乎每步都会被丢掉。只影响日志。 |
-| D25 | 膝部电机外壳碰撞体的接触 | USD 中把 `wheel_motor_[LR]_collision` 移到各自 1 g 的 `wheel_motor_[LR]_Link`（固定在膝上，碰撞位姿与过滤关系不变），接触传感因此与 mjlab 一样忽略外壳-地形接触；自碰撞仍包含外壳 | Isaac Lab 按 body 感知接触；若外壳留在膝 body 上，外壳触地就算非法接触。sim2sim 证实这是 Isaac Lab 摔倒率高 1.6–1.8 倍的原因（mjlab 也计外壳时差距消失）。 |
+| D25 | 膝部 `wheel_motor_[LR]_collision` 的地形接触 | USD 中把它移到各自 1 g 的 `wheel_motor_[LR]_Link`（fixed joint 固定在膝上，位姿/碰撞不变，对 hip/wheel 做 filtered pair），不计入非法接触，只计入 self-collision | mjlab 按 geom 区分接触，该 geom 既不在轮子组也不在非法组；Isaac Lab 按 body 感知，留在膝 body 上时每次外壳触地都算膝部非法接触。sim2sim（mjlab 训好的 OursGP）中这是 Isaac Lab 摔倒率高 1.6–1.8× 的原因：修复后 teacher 0.48 vs mjlab 0.48 次/env-min，膝部非法接触 26/32 vs 27/22；总质量 +2 g。 |
 | D26 | "接触"的判定 | 地形接触力 > 1 N（与 air time 用同一阈值） | mjlab 用"存在接触点"（`found > 0`）；PhysX 没有等价量。 |
 | D27 | 力矩 / 功率类奖励的力矩来源 | Isaac Lab 隐式执行器的 `applied_torque` 估计 | MuJoCo 用 `actuator_force` / `qfrc_actuator`；PhysX 不暴露隐式驱动的实际力矩。 |
 | D28 | 深度相机自遮挡包含哪些 link | 只投射 `wheel_L/R`、`knee_L/R` 的可视 mesh | mjlab 实测机器人像素 99% 来自这 4 个 link；与 mjlab 渲染对比 IoU=1.000（极端摆腿姿态下差 2 个像素，来自 abad/hip）。全部 9 个 link 可完全一致，但成本约 2.5 倍。 |
 | D29 | `non_finite_physics` 检查哪些传感器 | 只检查接触传感器（与 mjlab 一致） | 读取其它传感器的数据会强制懒更新的深度相机每步渲染；mjlab 只在 30 Hz 采样步读相机。 |
+| D30 | 任务命名与 runner 配置写法 | `Isaac-Limx-WF-TRON1B-Velocity-Rough-RepTS-LinVel-{BlindGP,Depth-Predict-OursGP}-v0`（+`-Play-v0`）；runner 配置用与 mjlab `rl_cfg.py` 同名的工厂函数 | 沿用本仓库 `Isaac-Limx-...` 前缀；工厂函数与 mjlab 一一对应，`asdict` 与 mjlab 仅 logger 字段不同（D8）。 |
+| D31 | ONNX 元数据 | 与 mjlab `get_wheeled_legged_metadata` 同字段、同序列化（3 位小数、嵌套用 `;`），关节相关字段按 MJCF 关节顺序，轮子 stiffness 报 kv（与 MuJoCo gainprm 一致） | 部署仓库按这些字段做校验；导出的 BlindGP / OursGP ONNX 均通过部署仓库自己的 validator，同一 checkpoint 的输出与 mjlab 导出的 ONNX 一致。 |
+| D32 | 与 mjlab 的训练曲线对比口径 | 2048 env、同迭代数；终止项按"各原因占比"比较 | mjlab 4096 env 在这台共享 GPU 上 OOM（2048 env 已用 15 GB）；Isaac Lab 记录的是各终止项占比，mjlab 记录的是每次 reset 的计数。 |
+| D33 | sim2sim 中剩余的差异 | 记为仿真器间固有差异，不做修正 | 用 mjlab 训好的 OursGP：teacher 摔倒率 0.48 vs 0.46 次/env-min（持平），student 1.49 vs 0.79；同一 teacher 轨迹上 student 的潜变量/速度/粗糙度估计两边一致，固定位姿下深度（≤8.3e-6 m）与本体观测完全一致，故 student 差距是 MuJoCo 蒸馏出的 student 对 PhysX 动力学偏移更敏感的闭环效应。另：yaw 角速度跟踪误差 Isaac Lab 高约 20%（物理/接触模型差异）。 |
