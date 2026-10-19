@@ -13,7 +13,7 @@ BSD-3-Clause license inherited from
 | Upstream license | BSD-3-Clause |
 | Fork base tag | **`v5.3.0`** |
 | Fork base commit | ⚠ TO CONFIRM — see "Provenance of the 5.3.0 re-sync" below |
-| Vendored version string | `5.3.0+limx.1` (in `pyproject.toml`) |
+| Vendored version string | `5.3.0+limx.2` (in `pyproject.toml`) |
 | Vendored license | BSD-3-Clause (unchanged from upstream) |
 
 Copyright notices (`Copyright (c) 2021-2026, ETH Zurich and NVIDIA CORPORATION`,
@@ -21,6 +21,31 @@ Copyright notices (`Copyright (c) 2021-2026, ETH Zurich and NVIDIA CORPORATION`,
 as-is; no upstream copyright headers were removed. The files added by LimX
 (listed below) carry the same upstream header because they were authored as
 derivative works inside the upstream tree.
+
+---
+
+## 2026-10 — sync with `wheeled_legged_mjlab@5e7c1af` (`5.3.0+limx.2`)
+
+`rsl_rl/rsl_rl/` and `rsl_rl/tests/` were replaced wholesale by the committed fork at
+`wheeled_legged_mjlab@5e7c1af`; the upstream base is unchanged (`v5.3.0`). Functional
+changes relative to `5.3.0+limx.1`:
+
+- Representation losses use cosine distance instead of MSE (all representation models).
+- Depth models: a wheel-roughness head with a smooth-L1 loss (`roughness_loss_coef`, active when a
+  `wheel_roughness` obs set is configured), the depth GRU also consumes the normalised current proprio
+  frame, configurable depth-CNN strides (`depth_conv_strides`), default GRU width 64 -> 128.
+- Predictor algorithm/model: a separate predictor optimiser (`predictor_learning_rate`), joint
+  latent-and-velocity dynamics prediction with a velocity loss
+  (`latent_dynamics_velocity_loss_coef`), optional EMA target encoder, and rollout/diagnostic
+  metrics for both parts. `representation_chunk_length` defaults to 24.
+- PPO and the representation algorithms resync their learning-rate attributes from the
+  optimiser after a checkpoint load.
+- `RolloutStorage` keeps each observation group's dtype.
+- Tests added: `tests/algorithms/test_checkpoint_learning_rates.py`,
+  `tests/storage/test_rollout_storage_dtype.py`.
+
+The mjlab-only, uncommitted `models/representation_velocity_predictor_actor_critic.py` is not
+vendored.
 
 ---
 
@@ -79,7 +104,7 @@ directories. These are upstream code, not LimX additions.
 
 | Vendored path | Purpose |
 |---------------|---------|
-| `rsl_rl/models/representation_actor_critic.py` | Teacher-student actor-critic; a privileged encoder and a proprioceptive-history encoder are aligned by an MSE representation loss. |
+| `rsl_rl/models/representation_actor_critic.py` | Teacher-student actor-critic; a privileged encoder and a proprioceptive-history encoder are aligned by a representation loss (cosine distance since `5.3.0+limx.2`). |
 | `rsl_rl/models/representation_velocity_actor_critic.py` | As above, plus a base-linear-velocity regression head feeding the actor. |
 | `rsl_rl/models/depth_representation_velocity_actor_critic.py` | As above, plus a depth CNN and a GRU over the depth features. |
 | `rsl_rl/models/depth_representation_velocity_predictor_actor_critic.py` | As above, plus multi-horizon latent-dynamics prediction heads. |
