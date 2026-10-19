@@ -76,11 +76,6 @@
 | D4 | `leg_joint_torque` 惩罚哪些关节？ | 全部 8 个执行器（腿+轮） | mjlab 的 `SceneEntityCfg(joint_names=腿)` 不会解析 `actuator_ids`（保持 `slice(None)`），`joint_torques_l2` 实际对所有执行器求和；论文 run 的 `params/env.yaml` 已确认。忠实复现。 |
 | D5 | 地形课程语义 | 按 mjlab：每种子地形恰好一列、行难度 `row/(rows-1)`、按 proportion（最大余数法）把 env 分配到列；实现为 `ColumnPerTerrainGenerator` + `ProportionalTerrainImporter` | Isaac Lab 默认按 proportion 分配列、env 均分、难度带随机抖动，三点都与 mjlab 不同，平地列占比会从 28% 变成 50%（已实测 28.05%）。 |
 | D6 | 子地形实现 | 除平地（`MeshPlaneTerrainCfg`）外全部按 mjlab 几何重写，包括 heightfield 类 | Isaac Lab 同名内置地形在台阶数、障碍采样、hfield 网格间距（0.15 vs 0.1538 m）、竖墙修正上都与 mjlab 不同；4 种 box 地形 Isaac Lab 没有。用 mjlab 自己的随机抽样喂给移植函数，高度网格误差 ≤1e-7 m。 |
-| D23 | 地形缓存与随机种子 | `use_cache=False`、`seed=None`（与 mjlab 相同，每次运行重新生成） | 50×20 网格生成 + 导入约 12 s。 |
-| D24 | 奖励/终止项写的 `Metrics/*` | 先暂存在 env 上，由 RSL-RL wrapper 在 step 后并入 `extras["log"]` | Isaac Lab 在任意 env reset 时重建 `extras["log"]`（mjlab 只在 step 开头清），否则这些指标几乎每步都会被丢掉。只影响日志。 |
-| D25 | 非法接触的粒度 | 按 body 统计，因此膝部 `wheel_motor` 碰撞体也算非法接触 | Isaac Lab 接触传感器按 body 不按 geom；mjlab 中这两个 geom 不在任何接触组里。 |
-| D26 | "接触"的判定 | 地形接触力 > 1 N（与 air time 用同一阈值） | mjlab 用"存在接触点"（`found > 0`）；PhysX 没有等价量。 |
-| D27 | 力矩 / 功率类奖励的力矩来源 | Isaac Lab 隐式执行器的 `applied_torque` 估计 | MuJoCo 用 `actuator_force` / `qfrc_actuator`；PhysX 不暴露隐式驱动的实际力矩。 |
 | D7 | 深度相机实现 | 待 spike（TiledCamera vs RayCasterCamera） | mjlab 渲染 geom group 0/1（地形 + 机器人可视 mesh），TiledCamera 才能看到机器人自身；RayCasterCamera 快但只看地形。 |
 | D8 | 默认 logger | tensorboard | 本仓库惯例；mjlab 默认 wandb（project `mjlab`）。命令行 `--logger wandb` 可切换。 |
 | D9 | `num_envs` | 4096 | 与 mjlab 默认一致（旧 port 为 2048）。 |
@@ -97,3 +92,8 @@
 | D20 | MuJoCo 执行器 → PhysX 映射 | kp/kv → drive stiffness/damping；`frictionloss` → static+dynamic friction；`forcerange` → `effort_limit_sim`；不设关节速度上限 | 实测 Isaac Sim 5.1 的关节摩擦字段为与载荷无关的力矩，语义与 MuJoCo 一致；旧 cfg 的 `velocity_limit` 实际不生效，已删。 |
 | D21 | 刚体最大角速度 | `max_angular_velocity` = 100 rad/s | 原 1000 是 deg/s（17.5 rad/s），会把轮速卡在动作可达的 20 rad/s 以下；MuJoCo 无此上限。 |
 | D22 | PhysX 轮速稳态偏差 | 接受 | 带载时 PhysX 轮速比目标高约 +0.3%~+2.3%（MuJoCo −0.15%），调 solver/armature 无法消除，远小于 ±20% 的增益 DR。 |
+| D23 | 地形缓存与随机种子 | `use_cache=False`、`seed=None`（与 mjlab 相同，每次运行重新生成） | 50×20 网格生成 + 导入约 12 s。 |
+| D24 | 奖励/终止项写的 `Metrics/*` | 先暂存在 env 上，由 RSL-RL wrapper 在 step 后并入 `extras["log"]` | Isaac Lab 在任意 env reset 时重建 `extras["log"]`（mjlab 只在 step 开头清），否则这些指标几乎每步都会被丢掉。只影响日志。 |
+| D25 | 非法接触的粒度 | 按 body 统计，因此膝部 `wheel_motor` 碰撞体也算非法接触 | Isaac Lab 接触传感器按 body 不按 geom；mjlab 中这两个 geom 不在任何接触组里。 |
+| D26 | "接触"的判定 | 地形接触力 > 1 N（与 air time 用同一阈值） | mjlab 用"存在接触点"（`found > 0`）；PhysX 没有等价量。 |
+| D27 | 力矩 / 功率类奖励的力矩来源 | Isaac Lab 隐式执行器的 `applied_torque` 估计 | MuJoCo 用 `actuator_force` / `qfrc_actuator`；PhysX 不暴露隐式驱动的实际力矩。 |
