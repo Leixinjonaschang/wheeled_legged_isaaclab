@@ -8,8 +8,12 @@ prims and leaves them renderable. After converting, this script
    the sensor prim paths assume -- and a single articulation root on ``base_Link``,
 2. hides the collision primitives from rendering: mjlab's depth camera only sees visual
    geoms, so a camera here must not see the collision cylinders either,
-3. spawns the articulation, checks it has exactly the MJCF's joints and bodies, and writes
-   the order PhysX resolves to ``joint_order.txt`` so a reordering shows up in review.
+3. moves each knee's wheel-motor housing collider onto its own 1 g link, fixed to the knee:
+   mjlab tells contacts apart per geom and ignores the housing's, Isaac Lab senses contact per
+   body, so the housing must not share the knee's body,
+4. spawns the articulation, checks it has exactly the MJCF's joints and bodies (plus the two
+   housing links), and writes the order PhysX resolves to ``joint_order.txt`` so a
+   reordering shows up in review.
 
 Usage:
     python scripts/tools/convert_wf_tron1b_mjcf.py --headless
@@ -39,7 +43,13 @@ enable_extension("isaacsim.asset.importer.mjcf")  # not part of the headless exp
 import isaaclab.sim as sim_utils
 from isaaclab.assets import Articulation, ArticulationCfg
 from isaaclab.sim.converters import MjcfConverter, MjcfConverterCfg
-from pxr import Sdf, Usd, UsdGeom, UsdPhysics
+from pxr import Gf, Sdf, Usd, UsdGeom, UsdPhysics
+
+# Housing link -> (knee it is fixed to, the knee's parent and child links it must not collide with).
+WHEEL_MOTOR_LINKS = {
+    f"wheel_motor_{side}_Link": (f"knee_{side}_Link", f"hip_{side}_Link", f"wheel_{side}_Link") for side in "LR"
+}
+WHEEL_MOTOR_MASS = 1.0e-3  # kg; the knee's MJCF inertial already accounts for the housing
 
 
 def import_mjcf(out_dir: str) -> str:
@@ -87,7 +97,41 @@ def flatten(raw_usd: str, out_usd: str) -> None:
     _apply(layer, [Sdf.NamespaceEdit.Reparent(link.path, root, -1) for link in layer.GetPrimAtPath(links).nameChildren])
     for name in (links.name, "worldBody"):
         del layer.GetPrimAtPath(root).nameChildren[name]
+    split_wheel_motors(layer, root)
     layer.Export(out_usd)
+
+
+def split_wheel_motors(layer: Sdf.Layer, root: Sdf.Path) -> None:
+    """Move each knee's wheel-motor housing collider onto its own link, fixed to the knee at the knee's pose."""
+    stage = Usd.Stage.Open(layer)
+    for name, (knee, parent, child) in WHEEL_MOTOR_LINKS.items():
+        knee_path, link_path = root.AppendChild(knee), root.AppendChild(name)
+        geom = name.removesuffix("_Link") + "_collision"
+        link = UsdGeom.Xform.Define(stage, link_path).GetPrim()
+        for attr in ("xformOp:translate", "xformOp:orient", "xformOp:scale", "xformOpOrder"):
+            Sdf.CopySpec(layer, knee_path.AppendProperty(attr), layer, link_path.AppendProperty(attr))
+        collisions = link_path.AppendChild("collisions")
+        UsdGeom.Xform.Define(stage, collisions).CreateVisibilityAttr(UsdGeom.Tokens.invisible)
+        _apply(layer, [Sdf.NamespaceEdit.Reparent(knee_path.AppendPath(f"collisions/{geom}"), collisions, -1)])
+
+        # A light solid cylinder (axis along the link's y) centred on the housing.
+        frame = stage.GetPrimAtPath(collisions.AppendChild(geom))
+        shape = UsdGeom.Cylinder(frame.GetChild(geom))
+        r, h, m = shape.GetRadiusAttr().Get(), shape.GetHeightAttr().Get(), WHEEL_MOTOR_MASS
+        UsdPhysics.RigidBodyAPI.Apply(link)
+        mass = UsdPhysics.MassAPI.Apply(link)
+        mass.CreateMassAttr(m)
+        mass.CreateCenterOfMassAttr(Gf.Vec3f(frame.GetAttribute("xformOp:translate").Get()))
+        transverse = m * (3 * r * r + h * h) / 12
+        mass.CreateDiagonalInertiaAttr(Gf.Vec3f(transverse, m * r * r / 2, transverse))
+        mass.CreatePrincipalAxesAttr(Gf.Quatf(1.0))
+        # MuJoCo never collides a geom with its body's parent or child; those were the knee's, keep them filtered.
+        pairs = UsdPhysics.FilteredPairsAPI.Apply(link).CreateFilteredPairsRel()
+        pairs.SetTargets([root.AppendChild(parent), root.AppendChild(child)])
+
+        joint = UsdPhysics.FixedJoint.Define(stage, root.AppendPath(f"joints/{name.removesuffix('_Link')}_Joint"))
+        joint.CreateBody0Rel().SetTargets([knee_path])
+        joint.CreateBody1Rel().SetTargets([link_path])
 
 
 def _apply(layer: Sdf.Layer, edits: list) -> None:
@@ -108,7 +152,7 @@ def audit(usd_path: str) -> None:
 
     mjcf = ET.parse(MJCF_PATH).getroot()
     mjcf_joints = [j.get("name") for j in mjcf.iter("joint") if j.get("name")]  # the free joint is unnamed
-    mjcf_bodies = [b.get("name") for b in mjcf.iter("body")]
+    mjcf_bodies = [b.get("name") for b in mjcf.iter("body")] + list(WHEEL_MOTOR_LINKS)
     if sorted(robot.joint_names) != sorted(mjcf_joints) or sorted(robot.body_names) != sorted(mjcf_bodies):
         raise AssertionError(f"USD {robot.joint_names} / {robot.body_names} != MJCF {mjcf_joints} / {mjcf_bodies}")
 
@@ -116,7 +160,8 @@ def audit(usd_path: str) -> None:
     lines = [
         "# Generated by scripts/tools/convert_wf_tron1b_mjcf.py -- do not edit by hand.",
         "# Joint and body order PhysX resolves. The task config never relies on it: it passes",
-        "# explicit ordered name lists with preserve_order=True.",
+        "# explicit ordered name lists with preserve_order=True. The wheel_motor_* links are fixed",
+        "# to the knees and only carry the wheel-motor housing colliders.",
         "",
         "[joints] (index, name, lower limit, upper limit [rad])",
         *(f"{i}\t{n}\t{limits[i, 0]:.6f}\t{limits[i, 1]:.6f}" for i, n in enumerate(robot.joint_names)),
