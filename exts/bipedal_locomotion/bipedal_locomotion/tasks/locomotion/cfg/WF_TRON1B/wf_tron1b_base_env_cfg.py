@@ -17,7 +17,7 @@ group                flat    rough
 ``actor``            31      31
 ``actor_history``    5 x 31  5 x 31
 ``critic``           42      166
-``dynamics_context`` 13      13
+``dynamics_context`` 87      87
 ===================  ======  ======
 """
 
@@ -308,7 +308,7 @@ class ObservationsCfg:
 
     @configclass
     class DynamicsContextCfg(ObsGroup):
-        """What was randomised this episode. Consumed by the teacher-side encoder."""
+        """What was randomised at startup (87 values). Consumed by the critic and the teacher encoder."""
 
         domain_randomization_delta_quantity = ObsTerm(func=mdp.domain_randomization_delta_quantity)
 
@@ -322,23 +322,53 @@ class ObservationsCfg:
     dynamics_context: DynamicsContextCfg = DynamicsContextCfg()
 
 
+# MJCF-ordered selections: the layout of mjlab's privileged DR observation.
+_MJCF_JOINTS = SceneEntityCfg("robot", joint_names=list(C.MJCF_JOINT_NAMES), preserve_order=True)
+_MJCF_BODIES = SceneEntityCfg("robot", body_names=list(C.MJCF_BODY_NAMES), preserve_order=True)
+_MJCF_LINKS = SceneEntityCfg("robot", body_names=list(C.MJCF_BODY_NAMES[1:]), preserve_order=True)
+
+
 @configclass
 class EventsCfg:
-    # -- startup
+    # -- startup: mjlab's domain randomisation, in mjlab's order. `domain_randomization_delta_quantity`
+    # reads the ranges and body / joint orders back from these terms.
     wheel_friction = EventTerm(
         func=mdp.randomize_wheel_friction,
         mode="startup",
-        params={"asset_cfg": _WHEEL_BODIES, "friction_range": C.WHEEL_FRICTION_RANGE},
+        params={
+            "asset_cfg": _WHEEL_BODIES,
+            "friction_range": C.WHEEL_FRICTION_RANGE,
+            "difference_range": C.WHEEL_FRICTION_DIFFERENCE_RANGE,
+        },
+    )
+    body_mass_inertia = EventTerm(
+        func=mdp.randomize_mass_inertia,
+        mode="startup",
+        params={"asset_cfg": _MJCF_BODIES, "alpha_range": C.MASS_INERTIA_ALPHA_RANGE},
     )
     encoder_bias = EventTerm(
         func=mdp.randomize_encoder_bias,
         mode="startup",
-        params={"asset_cfg": _ALL_JOINTS, "bias_range": C.ENCODER_BIAS_RANGE},
+        params={"asset_cfg": _MJCF_JOINTS, "bias_range": C.ENCODER_BIAS_RANGE},
+    )
+    pd_gains = EventTerm(
+        func=mdp.randomize_pd_gains,
+        mode="startup",
+        params={
+            "asset_cfg": _ALL_JOINTS,
+            "stiffness_scale_range": C.STIFFNESS_SCALE_RANGE,
+            "damping_scale_range": C.DAMPING_SCALE_RANGE,
+        },
     )
     base_com = EventTerm(
-        func=mdp.randomize_base_com,
+        func=mdp.randomize_com_offset,
         mode="startup",
         params={"asset_cfg": _BASE_BODY, "com_range": C.BASE_COM_RANGE},
+    )
+    link_com = EventTerm(
+        func=mdp.randomize_com_offset,
+        mode="startup",
+        params={"asset_cfg": _MJCF_LINKS, "com_range": C.LINK_COM_RANGE},
     )
 
     # -- reset
