@@ -3,8 +3,14 @@
 Every number here is taken from ``assets/mjcf/WF_TRON1B/xml/robot.xml`` so that the
 Isaac Lab model matches the MuJoCo one the policy was originally shaped against. The USD
 is generated from that same MJCF by ``scripts/tools/convert_wf_tron1b_mjcf.py``.
+
+MuJoCo terms map one-to-one onto the PhysX joint model (Isaac Sim >= 5.0):
+actuator ``kp`` / ``kv`` -> drive stiffness / damping, joint ``damping`` (passive) ->
+``viscous_friction``, joint ``frictionloss`` -> static and dynamic friction effort,
+``forcerange`` -> ``effort_limit_sim``. MuJoCo has no joint velocity limit, so none is set.
 """
 
+import math
 import os
 
 import isaaclab.sim as sim_utils
@@ -24,7 +30,9 @@ WHEELFOOT_TRON1B_CFG = ArticulationCfg(
             linear_damping=0.0,
             angular_damping=0.0,
             max_linear_velocity=1000.0,
-            max_angular_velocity=1000.0,
+            # In deg/s. The usual 1000 deg/s (17.5 rad/s) would cap the wheels below the
+            # 20 rad/s the action range commands; MuJoCo has no such cap.
+            max_angular_velocity=math.degrees(100.0),
             max_depenetration_velocity=5.0,
         ),
         articulation_props=sim_utils.ArticulationRootPropertiesCfg(
@@ -49,28 +57,28 @@ WHEELFOOT_TRON1B_CFG = ArticulationCfg(
     # limit and quietly change the task.
     soft_joint_pos_limit_factor=1.0,
     actuators={
-        # MJCF: <position kp="40.0" kv="1.8" forcerange="-80 80">
+        # MJCF: <position kp="40.0" kv="1.8" forcerange="-80 80">, joint damping 0.01.
         "legs": ImplicitActuatorCfg(
             joint_names_expr=["abad_[LR]_Joint", "hip_[LR]_Joint", "knee_[LR]_Joint"],
             stiffness=40.0,
-            # 1.8 actuator kv plus the 0.01 passive joint damping from the MJCF default.
-            damping=1.81,
+            damping=1.8,
             armature=0.01,
-            effort_limit=80.0,
-            # The MJCF sets no joint velocity limit; this is generous enough not to bind.
-            velocity_limit=25.0,
+            effort_limit_sim=80.0,
             friction=0.0,
+            dynamic_friction=0.0,
+            viscous_friction=0.01,
         ),
-        # MJCF: <velocity kv="0.5" forcerange="-40 40">. Zero stiffness is what makes
-        # this a velocity servo rather than a position one.
+        # MJCF: <velocity kv="0.5" forcerange="-40 40">, joint damping 0.01, frictionloss
+        # 0.01. Zero stiffness is what makes this a velocity servo rather than a position one.
         "wheels": ImplicitActuatorCfg(
             joint_names_expr=["wheel_[LR]_Joint"],
             stiffness=0.0,
             damping=0.5,
             armature=0.01,
-            effort_limit=40.0,
-            velocity_limit=40.0,
+            effort_limit_sim=40.0,
             friction=0.01,
+            dynamic_friction=0.01,
+            viscous_friction=0.01,
         ),
     },
 )
