@@ -29,8 +29,8 @@ ALL_JOINT_NAMES = LEG_JOINT_NAMES + WHEEL_JOINT_NAMES
 
 WHEEL_BODY_NAMES = ("wheel_L_Link", "wheel_R_Link")
 # Bodies that must never touch the ground: the bodies of mjlab's NON_WHEEL_COLLISION_GEOMS.
-# Contact is sensed per body here, so the knees' `wheel_motor_[LR]_collision` geoms (in neither
-# of mjlab's contact groups) also count as illegal contact.
+# The knees' wheel-motor housings are in neither of mjlab's contact groups; the USD gives them
+# their own `wheel_motor_[LR]_Link` bodies so that per-body contact sensing can leave them out.
 NON_WHEEL_BODY_NAMES = (
     "base_Link",
     "abad_L_Link",

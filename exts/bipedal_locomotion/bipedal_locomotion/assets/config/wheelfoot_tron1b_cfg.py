@@ -8,6 +8,10 @@ MuJoCo terms map one-to-one onto the PhysX joint model (Isaac Sim >= 5.0):
 actuator ``kp`` / ``kv`` -> drive stiffness / damping, joint ``damping`` (passive) ->
 ``viscous_friction``, joint ``frictionloss`` -> static and dynamic friction effort,
 ``forcerange`` -> ``effort_limit_sim``. MuJoCo has no joint velocity limit, so none is set.
+
+Besides the MJCF's nine bodies, the USD has two 1 g ``wheel_motor_[LR]_Link`` bodies fixed to
+the knees. They carry the wheel-motor housing colliders, which mjlab's geom-level contact groups
+leave out; per-body contact sensing can only do the same if the housings have their own bodies.
 """
 
 import math
