@@ -107,6 +107,8 @@ class RslRlVecEnvWrapper(VecEnv):
         if self.clip_actions is not None:
             actions = torch.clamp(actions, -self.clip_actions, self.clip_actions)
         obs_dict, rew, terminated, truncated, extras = self.env.step(actions)
+        # Metrics staged by reward / termination terms (see `mdp.log_metric`).
+        extras.setdefault("log", {}).update(self.unwrapped.__dict__.pop("_step_metrics", {}))
         dones = (terminated | truncated).to(dtype=torch.long)
         # Only expose time-outs when the task is treated as infinite-horizon, i.e. when a
         # time-out is an artifact of episode chunking and the value function should

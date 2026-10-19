@@ -117,8 +117,9 @@ def main() -> int:
         check(bool(torch.isfinite(rew).all()), f"non-finite reward at step {step}")
         check("applied_actions" in extras, f"extras is missing 'applied_actions' at step {step}")
 
-        sensor = env.unwrapped.scene["wheel_contact_forces"]
-        forces = torch.norm(sensor.data.net_forces_w, dim=-1)
+        sensor = env.unwrapped.scene["contact_forces"]
+        wheel_ids, _ = sensor.find_bodies(["wheel_L_Link", "wheel_R_Link"], preserve_order=True)
+        forces = torch.norm(sensor.data.net_forces_w[:, wheel_ids], dim=-1)
         contact_fractions.append((forces > 1.0).float().mean().item())
         episode_lengths.append(env.unwrapped.episode_length_buf.float().mean().item())
 
