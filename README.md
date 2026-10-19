@@ -82,8 +82,9 @@ For a summary of local modifications relative to upstream, see
 - **No training logs, TensorBoard events, or Weights & Biases runs.**
   `logs/`, `wandb/`, `events.out.tfevents.*` are `.gitignore`'d and
   CI-blocked.
-- **No test suite yet.** CI covers `python -m py_compile`, `ruff`,
-  forbidden-artifact scans, and license scans only. Adding a smoke
+- **No simulator tests in CI.** CI covers `python -m py_compile`, `ruff`,
+  forbidden-artifact scans, and license scans only; the unit tests in
+  `tests/` run without Isaac Sim but are not wired into CI. Adding a smoke
   training-step check on a headless GPU worker is tracked as
   follow-up work.
 - **No Isaac Sim redistribution.** You must obtain NVIDIA Isaac Sim
@@ -327,6 +328,14 @@ python -c "import bipedal_locomotion; print(bipedal_locomotion.__file__)"
 git ls-files | grep -iE \
   '(^|/)logs/|(^|/)wandb/|\.pt$|\.pth$|\.ckpt$|\.onnx$|events\.out\.tfevents\.' \
   && echo "!! training artifacts staged" && exit 1 || echo "ok"
+```
+
+The unit tests (MDP kernels against mjlab's reference implementations,
+terrains, depth buffer, domain randomisation, ONNX metadata) need the
+training environment's Python packages but not Isaac Sim:
+
+```bash
+python -m pytest tests
 ```
 
 On a machine with Isaac Sim 5.1 / Isaac Lab 2.3.1 installed, a short

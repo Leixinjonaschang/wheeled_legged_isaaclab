@@ -69,8 +69,9 @@
 - **不含训练日志、TensorBoard events 或 Weights & Biases 记录。**
   `logs/`、`wandb/`、`events.out.tfevents.*` 均被 `.gitignore`
   屏蔽并在 CI 中拦截。
-- **暂无测试套件。** CI 仅覆盖 `python -m py_compile`、`ruff`、
-  违禁产物扫描与许可扫描。在无头 GPU worker 上跑一次冒烟训练
+- **CI 不跑仿真测试。** CI 仅覆盖 `python -m py_compile`、`ruff`、
+  违禁产物扫描与许可扫描；`tests/` 下的单元测试无需 Isaac Sim，但未接入 CI。
+  在无头 GPU worker 上跑一次冒烟训练
   作为后续工作跟踪。
 - **不含 Isaac Sim 的再分发。** 必须自行从 NVIDIA 获取 Isaac Sim
   5.1 并接受 NVIDIA 专有 EULA，才可安装本训练栈。本仓库不授予
@@ -278,6 +279,13 @@ python -c "import bipedal_locomotion; print(bipedal_locomotion.__file__)"
 git ls-files | grep -iE \
   '(^|/)logs/|(^|/)wandb/|\.pt$|\.pth$|\.ckpt$|\.onnx$|events\.out\.tfevents\.' \
   && echo "!! training artifacts staged" && exit 1 || echo "ok"
+```
+
+单元测试（MDP kernel 与 mjlab 参考实现对比、地形、深度缓冲、域随机化、
+ONNX 元数据）需要训练环境中的 Python 包，但不需要 Isaac Sim：
+
+```bash
+python -m pytest tests
 ```
 
 在装有 Isaac Sim 5.1 / Isaac Lab 2.3.1 的机器上，可以跑一次简短的
