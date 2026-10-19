@@ -12,6 +12,7 @@ diff them against the cited source rather than trust this docstring.
 Reference (sibling repository ``wheeled_legged_mjlab``):
     src/wheeled_legged_mjlab/tasks/velocity/mdp/rewards.py
     src/wheeled_legged_mjlab/tasks/velocity/mdp/observations.py
+    src/wheeled_legged_mjlab/tasks/velocity/mdp/terminations.py
 """
 
 import math
@@ -188,6 +189,146 @@ def _ref_delay_step_bounds(delay_range_s, physics_dt):
     return min_steps, max_steps
 
 
+def _ref_wheel_roughness_gate(height_samples, wheel_radius, gate_min, gate_max, grid_shape):
+    """observations.py::wheel_roughness_gate, from the sensor samples onward"""
+    height_samples = torch.nan_to_num(height_samples, nan=0.0, posinf=0.0, neginf=0.0)
+    rows, cols = _ref_resolve_grid_shape(height_samples.shape[-1], grid_shape)
+    grid = height_samples.view(height_samples.shape[0], 2, rows, cols)
+    zeros = torch.zeros_like(height_samples[..., 0])
+
+    if cols > 1:
+        jump_x = torch.abs(grid[..., 1:] - grid[..., :-1]).amax(dim=(-1, -2))
+    else:
+        jump_x = zeros
+    if rows > 1:
+        jump_y = torch.abs(grid[..., 1:, :] - grid[..., :-1, :]).amax(dim=(-1, -2))
+    else:
+        jump_y = zeros
+    jump = torch.maximum(jump_x, jump_y)
+
+    if cols > 2:
+        curvature_x = torch.abs(grid[..., :, 2:] - 2.0 * grid[..., :, 1:-1] + grid[..., :, :-2]).amax(dim=(-1, -2))
+    else:
+        curvature_x = zeros
+    if rows > 2:
+        curvature_y = torch.abs(grid[..., 2:, :] - 2.0 * grid[..., 1:-1, :] + grid[..., :-2, :]).amax(dim=(-1, -2))
+    else:
+        curvature_y = zeros
+    curvature = torch.maximum(curvature_x, curvature_y)
+    roughness = torch.maximum(jump, curvature) / wheel_radius
+    u = torch.clamp((roughness - gate_min) / (gate_max - gate_min), 0.0, 1.0)
+    return u * u * (3.0 - 2.0 * u)
+
+
+def _ref_quantile_ground_z(hit_z, valid_hit, terrain_quantile):
+    """rewards.py::base_height_l2, terrain_sample="quantile" branch"""
+    valid_heights = torch.where(valid_hit, hit_z, torch.full_like(hit_z, torch.nan))
+    ground_z = torch.nanquantile(valid_heights, terrain_quantile, dim=1)
+    return torch.nan_to_num(ground_z, nan=0.0)
+
+
+def _ref_self_collision_cost(force_history, force_threshold):
+    """rewards.py::self_collision_cost, force-history branch (mjlab layout [B, N, H, 3])"""
+    force_history = torch.nan_to_num(force_history, nan=0.0, posinf=0.0, neginf=0.0)
+    force_mag = torch.norm(force_history, dim=-1)
+    hit = (force_mag > force_threshold).any(dim=1)
+    return hit.sum(dim=-1).float()
+
+
+def _ref_illegal_contact(force_history, force_threshold):
+    """terminations.py::illegal_contact, force-history branch (mjlab layout [B, N, H, 3])"""
+    force_mag = torch.norm(force_history, dim=-1)
+    return (force_mag > force_threshold).any(dim=-1).any(dim=-1)
+
+
+class _RefWorldCommandTrackingFailure:
+    """terminations.py::world_command_tracking_failure, with the env reads replaced by arguments"""
+
+    def __init__(self, num_envs):
+        self._progress_bad_steps = torch.zeros(num_envs, dtype=torch.long)
+        self._direction_bad_steps = torch.zeros_like(self._progress_bad_steps)
+        self._heading_bad_steps = torch.zeros_like(self._progress_bad_steps)
+        self._command_age_steps = torch.zeros_like(self._progress_bad_steps)
+        self._last_command_counter = torch.full_like(self._progress_bad_steps, -1)
+
+    def __call__(
+        self, common_step_counter, step_dt, command_counter, command_w_xy, actual_xy, heading_target, heading_w,
+        is_heading_env, is_standing_env, found, activation_step=120_000, command_norm_threshold=0.35,
+        progress_deficit_threshold=0.45, min_progress_ratio=0.55, progress_duration_s=0.4,
+        actual_speed_threshold=0.2, direction_angle_threshold_deg=70.0, direction_duration_s=0.3,
+        heading_error_threshold_deg=55.0, heading_duration_s=0.6, heading_alignment_gate_deg=45.0,
+        command_grace_s=2.5,
+    ):
+        command_changed = command_counter != self._last_command_counter
+        self._command_age_steps = torch.where(
+            command_changed, torch.zeros_like(self._command_age_steps), self._command_age_steps + 1
+        )
+        self._last_command_counter = command_counter.clone()
+
+        command_xy = command_w_xy
+        command_norm = torch.norm(command_xy, dim=1)
+        actual_speed = torch.norm(actual_xy, dim=1)
+        command_direction = command_xy / command_norm.unsqueeze(1).clamp_min(1.0e-6)
+        progress_velocity = torch.sum(actual_xy * command_direction, dim=1)
+        progress_deficit = torch.clamp(command_norm - progress_velocity, min=0.0)
+        progress_ratio = progress_velocity / command_norm.clamp_min(1.0e-6)
+        cos_angle = progress_velocity / (actual_speed + 1.0e-6)
+        cos_angle = torch.clamp(cos_angle, -1.0, 1.0)
+
+        heading_error = torch.abs(_ref_wrap_to_pi(heading_target - heading_w))
+        grounded = torch.any(found, dim=-1)
+
+        progress_duration_steps = max(1, math.ceil(progress_duration_s / step_dt))
+        direction_duration_steps = max(1, math.ceil(direction_duration_s / step_dt))
+        heading_duration_steps = max(1, math.ceil(heading_duration_s / step_dt))
+        command_grace_steps = max(0, math.ceil(command_grace_s / step_dt))
+        command_active = (
+            (common_step_counter >= activation_step)
+            & (command_norm > command_norm_threshold)
+            & (self._command_age_steps >= command_grace_steps)
+        )
+        heading_aligned = heading_error < math.radians(heading_alignment_gate_deg)
+        linear_check_active = command_active & grounded & heading_aligned
+        heading_check_active = command_active & grounded & is_heading_env & ~is_standing_env
+
+        bad_progress = linear_check_active & (
+            (progress_deficit > progress_deficit_threshold) | (progress_ratio < min_progress_ratio)
+        )
+        bad_direction = (
+            linear_check_active
+            & (actual_speed > actual_speed_threshold)
+            & (cos_angle < math.cos(math.radians(direction_angle_threshold_deg)))
+        )
+        bad_heading = heading_check_active & (heading_error > math.radians(heading_error_threshold_deg))
+        self._progress_bad_steps = torch.where(
+            bad_progress, self._progress_bad_steps + 1, torch.zeros_like(self._progress_bad_steps)
+        )
+        self._direction_bad_steps = torch.where(
+            bad_direction, self._direction_bad_steps + 1, torch.zeros_like(self._direction_bad_steps)
+        )
+        self._heading_bad_steps = torch.where(
+            bad_heading, self._heading_bad_steps + 1, torch.zeros_like(self._heading_bad_steps)
+        )
+        return (
+            (self._progress_bad_steps >= progress_duration_steps)
+            | (self._direction_bad_steps >= direction_duration_steps)
+            | (self._heading_bad_steps >= heading_duration_steps)
+        )
+
+    def reset(self, env_ids):
+        self._progress_bad_steps[env_ids] = 0
+        self._direction_bad_steps[env_ids] = 0
+        self._heading_bad_steps[env_ids] = 0
+        self._command_age_steps[env_ids] = 0
+        self._last_command_counter[env_ids] = -1
+
+
+def _ref_wrap_to_pi(angles):
+    """mjlab.utils.lab_api.math.wrap_to_pi"""
+    wrapped_angle = torch.remainder(angles, 2 * math.pi)
+    return torch.where(wrapped_angle > math.pi, wrapped_angle - 2 * math.pi, wrapped_angle)
+
+
 # ======================================================================================
 # Parity assertions
 # ======================================================================================
@@ -362,3 +503,82 @@ class TestDomainRandomizationParity:
     )
     def test_delay_step_bounds_match(self, delay_range, dt):
         assert kernels.delay_step_bounds(delay_range, dt) == _ref_delay_step_bounds(delay_range, dt)
+
+
+class TestNewTermParity:
+    """Terms added when re-syncing with mjlab HEAD."""
+
+    @pytest.mark.parametrize("grid_shape", [(5, 5), (11, 11)])
+    def test_wheel_roughness_gate_matches(self, grid_shape):
+        samples = torch.rand(64, 2, grid_shape[0] * grid_shape[1]) * 0.15 + 0.2
+        stats = kernels.terrain_roughness_from_height_samples(
+            samples, wheel_radius=0.127, gate_min=0.0, gate_max=0.5, grid_shape=grid_shape
+        )
+        assert torch.allclose(
+            kernels.smoothstep_gate(stats.foot_roughness, 0.0, 0.5),
+            _ref_wheel_roughness_gate(samples, 0.127, 0.0, 0.5, grid_shape),
+            atol=ATOL,
+        )
+
+    def test_quantile_ground_height_matches(self):
+        hit_z = torch.randn(64, 121) * 0.1
+        valid = torch.rand(64, 121) > 0.1
+        valid[0] = False  # no hit at all -> 0
+        valid[1, 1:] = False  # single hit
+        assert torch.allclose(
+            kernels.ground_height_quantile(hit_z, valid, 0.75), _ref_quantile_ground_z(hit_z, valid, 0.75), atol=ATOL
+        )
+
+    def test_contact_substep_count_matches_self_collision_cost_and_illegal_contact(self):
+        history_mjlab = torch.randn(64, 7, 4, 3) * 8.0  # [B, N, H, 3]
+        history_mjlab[0, 2, 1] = torch.nan
+        history_isaac = history_mjlab.transpose(1, 2)  # Isaac Lab layout [B, H, N, 3]
+        count = kernels.contact_substep_count(history_isaac, 10.0)
+        assert torch.equal(count, _ref_self_collision_cost(history_mjlab, 10.0))
+        assert torch.equal(count > 0, _ref_illegal_contact(history_mjlab, 10.0))
+
+    def test_command_tracking_monitor_matches(self):
+        num_envs, step_dt = 32, 0.02
+        params = dict(
+            command_norm_threshold=0.35, progress_deficit_threshold=0.45, min_progress_ratio=0.55,
+            progress_duration_s=0.4, actual_speed_threshold=0.2, direction_angle_threshold_deg=70.0,
+            direction_duration_s=0.3, heading_error_threshold_deg=45.0, heading_duration_s=0.6,
+            heading_alignment_gate_deg=45.0, command_grace_s=0.1,
+        )
+        ref = _RefWorldCommandTrackingFailure(num_envs)
+        got = kernels.CommandTrackingMonitor(num_envs, "cpu")
+        command_counter = torch.zeros(num_envs, dtype=torch.long)
+        command_xy = torch.randn(num_envs, 2)
+        heading_target = torch.rand(num_envs) * 2 * math.pi - math.pi
+        is_heading_env = torch.rand(num_envs) > 0.2
+        is_standing_env = torch.rand(num_envs) < 0.1
+        # Fixed per-env tracking quality, so some envs fail persistently and some never.
+        speed_ratio = torch.rand(num_envs, 1) * 1.2
+        heading_offset = torch.randn(num_envs) * 0.9
+        fired = 0
+        for step in range(200):
+            if step % 37 == 0:  # resample some commands
+                resampled = torch.rand(num_envs) < 0.5
+                command_counter = command_counter + resampled.long()
+                command_xy = torch.where(resampled.unsqueeze(1), torch.randn(num_envs, 2), command_xy)
+            actual_xy = command_xy * speed_ratio + torch.randn(num_envs, 2) * 0.05
+            heading_w = heading_target + heading_offset + torch.randn(num_envs) * 0.05
+            found = torch.rand(num_envs, 2) > 0.05
+            common_step_counter = 0 if step < 20 else 120_000
+            expected = ref(
+                common_step_counter, step_dt, command_counter, command_xy, actual_xy, heading_target, heading_w,
+                is_heading_env, is_standing_env, found, **params,
+            )
+            done, metrics = got.update(
+                command_counter=command_counter, command_xy=command_xy, actual_xy=actual_xy,
+                heading_error=_ref_wrap_to_pi(heading_target - heading_w), grounded=found.any(dim=-1),
+                is_heading_env=is_heading_env, is_standing_env=is_standing_env,
+                enabled=common_step_counter >= 120_000, step_dt=step_dt, **params,
+            )
+            assert torch.equal(done, expected), step
+            assert all(torch.isfinite(torch.as_tensor(v)).all() for v in metrics.values())
+            fired += int(done.sum())
+            reset_ids = done.nonzero().flatten()
+            ref.reset(reset_ids)
+            got.reset(reset_ids)
+        assert fired > 0  # the sequence actually exercises the termination

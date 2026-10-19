@@ -57,6 +57,7 @@ def _apply_play_overrides(cfg: WF_TRON1B_BaseEnvCfg) -> None:
     cfg.curriculum.fell_over_limit_angle = None
     cfg.curriculum.terrain_levels = None
     cfg.terminations.fell_over.params["limit_angle"] = C.FELL_OVER_LIMIT_ANGLE_FINAL
+    cfg.terminations.world_command_tracking_failure = None
     for term in vars(cfg.rewards).values():
         params = getattr(term, "params", None)
         if params and "roughness_gate_threshold_ramp_steps" in params:
@@ -87,6 +88,7 @@ class WF_TRON1B_RoughEnvCfg_PLAY(WF_TRON1B_RoughEnvCfg):
     def __post_init__(self):
         super().__post_init__()
         _apply_play_overrides(self)
+        self.terminations.out_of_terrain_bounds = None
         # Without the terrain-level curriculum every environment would sit on whichever
         # patch it spawned on, so a play session would show a single difficulty.
         self.events.randomize_terrain = EventTerm(func=wheeled_events.randomize_terrain, mode="reset", params={})
@@ -121,6 +123,7 @@ class WF_TRON1B_FlatEnvCfg(WF_TRON1B_BaseEnvCfg):
         self.scene.terrain_scan = None
         self.scene.wheel_height_scan_L = None
         self.scene.wheel_height_scan_R = None
+        self.scene.contact_forces.filter_prim_paths_expr = ["/World/ground/terrain/GroundPlane/CollisionPlane"]
 
         self.observations.critic.height_scan = None
         self.observations.critic.wheel_height = None
@@ -131,6 +134,7 @@ class WF_TRON1B_FlatEnvCfg(WF_TRON1B_BaseEnvCfg):
         self.rewards.rough_contact_pattern = None
         self.rewards.non_rough_wheel_lateral_symmetry = None
         self.rewards.non_rough_wheel_x_alignment = None
+        self.rewards.non_rough_flat_orientation = None
         self.rewards.standing_forward_wheel_air_time = None
 
         # These two fall back to their world-frame / absolute definitions, which are

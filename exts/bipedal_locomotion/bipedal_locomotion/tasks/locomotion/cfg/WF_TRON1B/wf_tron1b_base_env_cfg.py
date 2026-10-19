@@ -52,16 +52,19 @@ _WHEEL_JOINTS = SceneEntityCfg("robot", joint_names=list(C.WHEEL_JOINT_NAMES), p
 _ALL_JOINTS = SceneEntityCfg("robot", joint_names=list(C.ALL_JOINT_NAMES), preserve_order=True)
 _WHEEL_BODIES = SceneEntityCfg("robot", body_names=list(C.WHEEL_BODY_NAMES), preserve_order=True)
 _BASE_BODY = SceneEntityCfg("robot", body_names=[C.BASE_BODY])
-_WHEEL_CONTACTS = SceneEntityCfg(C.WHEEL_CONTACT_SENSOR, body_names=list(C.WHEEL_BODY_NAMES), preserve_order=True)
-_ILLEGAL_CONTACTS = SceneEntityCfg(C.ILLEGAL_CONTACT_SENSOR, body_names=list(C.NON_WHEEL_BODY_NAMES))
+_WHEEL_CONTACTS = SceneEntityCfg(C.CONTACT_SENSOR, body_names=list(C.WHEEL_BODY_NAMES), preserve_order=True)
+_ILLEGAL_CONTACTS = SceneEntityCfg(C.CONTACT_SENSOR, body_names=list(C.NON_WHEEL_BODY_NAMES))
+_ROBOT_CONTACTS = SceneEntityCfg(C.CONTACT_SENSOR)
 _TERRAIN_SCAN = SceneEntityCfg(C.TERRAIN_SCAN_SENSOR)
 
+# Shared by every terrain-gated reward: the gate is computed from the base scan, as in mjlab.
 _ROUGHNESS_KWARGS = {
-    "roughness_sensor_names": C.WHEEL_HEIGHT_SENSORS,
+    "roughness_sensor_names": (C.TERRAIN_SCAN_SENSOR,),
+    "roughness_max_distance": C.TERRAIN_SCAN_MAX_DISTANCE,
     "wheel_radius": C.WHEEL_RADIUS,
     "gate_min": C.ROUGHNESS_GATE_MIN,
     "gate_max": C.ROUGHNESS_GATE_MAX,
-    "grid_shape": C.WHEEL_HEIGHT_GRID_SHAPE,
+    "grid_shape": C.TERRAIN_SCAN_GRID_SHAPE,
     "roughness_gate_threshold": C.ROUGHNESS_GATE_THRESHOLD_INITIAL,
     "roughness_gate_threshold_final": C.ROUGHNESS_GATE_THRESHOLD_FINAL,
     "roughness_gate_threshold_ramp_steps": C.ROUGHNESS_GATE_THRESHOLD_RAMP_STEPS,
@@ -141,20 +144,15 @@ class WF_TRON1B_SceneCfg(InteractiveSceneCfg):
         debug_vis=False,
     )
 
-    # Two contact sensors rather than one catch-all: history_length is a sensor-wide
-    # setting, and only the illegal-contact term needs sub-step history.
-    wheel_contact_forces = ContactSensorCfg(
-        prim_path="{ENV_REGEX_NS}/Robot/wheel_.*_Link",
-        history_length=0,
+    # Every robot body, filtered on the terrain mesh: the force matrix is the terrain contact
+    # (mjlab's wheel / illegal-ground sensors), net minus matrix the robot-on-robot contact (its
+    # self-collision sensor). The history spans the physics substeps of one control step.
+    contact_forces = ContactSensorCfg(
+        prim_path="{ENV_REGEX_NS}/Robot/.*_Link",
+        filter_prim_paths_expr=["/World/ground/terrain/mesh"],
+        history_length=C.DECIMATION,
         track_air_time=True,
         force_threshold=C.CONTACT_FORCE_THRESHOLD,
-        update_period=0.0,
-    )
-    illegal_contact_forces = ContactSensorCfg(
-        prim_path="{ENV_REGEX_NS}/Robot/(base|abad_[LR]|hip_[LR]|knee_[LR])_Link",
-        history_length=4,
-        track_air_time=False,
-        update_period=0.0,
     )
 
     light = AssetBaseCfg(
@@ -172,7 +170,7 @@ class WF_TRON1B_SceneCfg(InteractiveSceneCfg):
 class CommandsCfg:
     twist = mdp.WheeledUniformVelocityCommandCfg(
         asset_name=C.ROBOT_ENTITY,
-        resampling_time_range=(3.0, 8.0),
+        resampling_time_range=(6.0, 10.0),
         rel_standing_envs=0.1,
         rel_heading_envs=1.0,
         rel_forward_envs=0.2,
@@ -180,7 +178,7 @@ class CommandsCfg:
         heading_control_stiffness=1.0,
         debug_vis=False,
         ranges=mdp.WheeledUniformVelocityCommandCfg.Ranges(
-            lin_vel_x=(-1.0, 1.5),
+            lin_vel_x=(-1.0, 2.0),
             lin_vel_y=(-1.0, 1.0),
             ang_vel_z=(-math.pi / 2, math.pi / 2),
             heading=(-math.pi, math.pi),
@@ -297,12 +295,12 @@ class ObservationsCfg:
         roughness_indicator = ObsTerm(
             func=mdp.terrain_roughness_indicator,
             params={
-                "sensor_names": C.WHEEL_HEIGHT_SENSORS,
+                "sensor_names": (C.TERRAIN_SCAN_SENSOR,),
                 "wheel_radius": C.WHEEL_RADIUS,
                 "gate_min": C.ROUGHNESS_GATE_MIN,
                 "gate_max": C.ROUGHNESS_GATE_MAX,
-                "grid_shape": C.WHEEL_HEIGHT_GRID_SHAPE,
-                "max_distance": C.WHEEL_HEIGHT_MAX_DISTANCE,
+                "grid_shape": C.TERRAIN_SCAN_GRID_SHAPE,
+                "max_distance": C.TERRAIN_SCAN_MAX_DISTANCE,
             },
         )
 
@@ -381,32 +379,37 @@ class EventsCfg:
         mode="reset",
         params={
             "pose_range": {"x": (-0.5, 0.5), "y": (-0.5, 0.5), "z": (0.01, 0.05), "yaw": (-math.pi, math.pi)},
-            "velocity_range": {"x": (-0.3, 0.3), "y": (-0.2, 0.2), "yaw": (-0.2, 0.2)},
+            "velocity_range": {
+                "x": (-0.3, 0.3),
+                "y": (-0.3, 0.3),
+                "z": (-0.2, 0.2),
+                "roll": (-0.25, 0.25),
+                "pitch": (-0.25, 0.25),
+                "yaw": (-0.2, 0.2),
+            },
             "asset_cfg": SceneEntityCfg("robot"),
         },
     )
     reset_leg_joints = EventTerm(
         func=mdp.reset_joints_by_offset,
         mode="reset",
-        params={"position_range": (-0.3, 0.5), "velocity_range": (-0.2, 0.2), "asset_cfg": _LEG_JOINTS},
+        params={"position_range": (-0.3, 0.3), "velocity_range": (-0.2, 0.2), "asset_cfg": _LEG_JOINTS},
     )
-    # Wheels reset to zero position: a wheel angle is meaningless, and randomising it
-    # would only scramble the (unobserved) joint state.
     reset_wheel_joints = EventTerm(
         func=mdp.reset_joints_by_offset,
         mode="reset",
-        params={"position_range": (0.0, 0.0), "velocity_range": (-0.1, 0.1), "asset_cfg": _WHEEL_JOINTS},
+        params={"position_range": (0.0, 0.0), "velocity_range": (-0.5, 0.5), "asset_cfg": _WHEEL_JOINTS},
     )
 
     # -- interval
     push_robot = EventTerm(
         func=mdp.push_by_setting_velocity,
         mode="interval",
-        interval_range_s=(15.0, 15.5),
+        interval_range_s=(10.0, 15.0),
         params={
             "velocity_range": {
                 "x": (-0.5, 0.5),
-                "y": (-0.5, 0.5),
+                "y": (-0.6, 0.6),
                 "z": (-0.2, 0.2),
                 "roll": (-0.35, 0.35),
                 "pitch": (-0.35, 0.35),
@@ -418,7 +421,8 @@ class EventsCfg:
 
 @configclass
 class RewardsCfg:
-    # -- task
+    """mjlab ``make_rewards(rough=True, roughness_conditioned_rewards=True)``, same order and weights."""
+
     alive = RewTerm(func=mdp.is_alive, weight=0.1)
     track_linear_velocity = RewTerm(
         func=mdp.track_linear_velocity,
@@ -430,37 +434,22 @@ class RewardsCfg:
         weight=1.0,
         params={"command_name": C.COMMAND_NAME, "std": math.sqrt(0.25)},
     )
+    base_ang_vel_xy = RewTerm(
+        func=mdp.base_ang_vel_xy_l2,
+        weight=-0.15,
+        params={"roll_weight": 2.0, "pitch_weight": 1.0},
+    )
     track_heading = RewTerm(
         func=mdp.track_heading,
         weight=0.5,
         params={"command_name": C.COMMAND_NAME, "std": math.sqrt(0.20), "command_norm_threshold": 0.05},
     )
-    # Disabled, matching the mjlab reference. Both RewardManagers skip zero-weight terms
-    # entirely, so this term is not merely scaled to nothing -- it is never called, and
-    # its internal per-step state never advances. Raise the weight to enable it.
-    heading_progress = RewTerm(
-        func=mdp.HeadingProgress,
-        weight=0.0,
-        params={"command_name": C.COMMAND_NAME, "max_progress": 0.05},
-    )
-    stand_still = RewTerm(
-        func=mdp.stand_still_world,
-        weight=-2.0,
-        params={"command_name": C.COMMAND_NAME},
-    )
-
-    # -- base regulation
     upright = RewTerm(
-        func=mdp.Upright,
+        func=mdp.upright,
         weight=1.0,
         params={"std": math.sqrt(0.2), "asset_cfg": _BASE_BODY, "terrain_sensor_cfg": _TERRAIN_SCAN},
     )
     flat_orientation = RewTerm(func=mdp.flat_orientation_l2, weight=-3.0)
-    base_ang_vel_xy = RewTerm(
-        func=mdp.base_ang_vel_xy_l2,
-        weight=-0.15,
-        params={"roll_weight": 1.0, "pitch_weight": 2.0},
-    )
     base_height = RewTerm(
         func=mdp.base_height_l2,
         weight=-50.0,
@@ -468,10 +457,9 @@ class RewardsCfg:
             "target_height": C.BASE_HEIGHT_TARGET,
             "deadband": C.BASE_HEIGHT_DEADBAND,
             "sensor_cfg": _TERRAIN_SCAN,
+            "terrain_quantile": C.BASE_HEIGHT_TERRAIN_QUANTILE,
         },
     )
-
-    # -- posture
     pose = RewTerm(
         func=mdp.VariablePosture,
         weight=0.5,
@@ -486,6 +474,7 @@ class RewardsCfg:
             "running_threshold": C.POSE_RUNNING_THRESHOLD,
         },
     )
+    stand_still = RewTerm(func=mdp.stand_still_world, weight=-2.0, params={"command_name": C.COMMAND_NAME})
     wheel_distance = RewTerm(
         func=mdp.wheel_distance,
         weight=-5.0,
@@ -495,29 +484,28 @@ class RewardsCfg:
             "max_distance": C.WHEEL_DISTANCE_RANGE[1],
         },
     )
-
-    # -- joint regulation
     leg_joint_pos_limits = RewTerm(func=mdp.joint_pos_limits, weight=-5.0, params={"asset_cfg": _LEG_JOINTS})
-    leg_joint_vel = RewTerm(func=mdp.joint_vel_l2, weight=-0.02, params={"asset_cfg": _LEG_JOINTS})
-    leg_joint_torque = RewTerm(func=mdp.joint_torques_l2, weight=-1.0e-5, params={"asset_cfg": _LEG_JOINTS})
-    wheel_joint_vel = RewTerm(func=mdp.joint_vel_l2, weight=-0.002, params={"asset_cfg": _WHEEL_JOINTS})
+    leg_joint_vel = RewTerm(func=mdp.joint_vel_l2, weight=-0.015, params={"asset_cfg": _LEG_JOINTS})
+    # mjlab's joint-name selection leaves its actuator ids unresolved, so this sums over all
+    # eight actuators, wheels included (decision D4).
+    leg_joint_torque = RewTerm(func=mdp.joint_torques_l2, weight=-1.0e-5, params={"asset_cfg": _ALL_JOINTS})
+    wheel_joint_vel = RewTerm(func=mdp.joint_vel_l2, weight=-0.0005, params={"asset_cfg": _WHEEL_JOINTS})
     joint_acc = RewTerm(func=mdp.joint_acc_l2, weight=-1.0e-7, params={"asset_cfg": _ALL_JOINTS})
-    # `joint_powers_l1` (a local term predating this task) sums over *every* joint and
-    # ignores asset_cfg.joint_ids. That is numerically correct here only because
-    # _ALL_JOINTS is all eight joints; adding a joint to the robot would change what this
-    # penalises without changing this line.
-    joint_power = RewTerm(func=mdp.joint_powers_l1, weight=-5.0e-5, params={"asset_cfg": _ALL_JOINTS})
+    joint_power = RewTerm(func=mdp.joint_power_l1, weight=-5.0e-5, params={"asset_cfg": _ALL_JOINTS})
     action_rate = RewTerm(func=mdp.action_rate_l2, weight=-0.1)
-
-    # -- contact safety
+    self_collisions = RewTerm(
+        func=mdp.self_collision_cost,
+        weight=-0.1,
+        params={"sensor_cfg": _ROBOT_CONTACTS, "force_threshold": C.ILLEGAL_CONTACT_FORCE_THRESHOLD},
+    )
     illegal_ground_contact = RewTerm(
-        func=mdp.contact_force_cost,
+        func=mdp.illegal_contact_cost,
         weight=-1.0,
         params={"sensor_cfg": _ILLEGAL_CONTACTS, "force_threshold": C.ILLEGAL_CONTACT_FORCE_THRESHOLD},
     )
     soft_landing = RewTerm(
         func=mdp.soft_landing,
-        weight=-1.0e-5,
+        weight=-3.0e-5,
         params={"sensor_cfg": _WHEEL_CONTACTS, "command_name": C.COMMAND_NAME, "command_threshold": 0.05},
     )
     wheel_air_time_balance = RewTerm(
@@ -526,10 +514,10 @@ class RewardsCfg:
         params={"sensor_cfg": _WHEEL_CONTACTS, "min_total_air_time": 1.0, "balance_tolerance": 0.2},
     )
 
-    # -- rough-terrain gated (nulled by the flat config)
+    # -- terrain-gated: legged motion on rough terrain (nulled by the flat config)
     rough_wheel_usage = RewTerm(
         func=mdp.rough_wheel_usage,
-        weight=-3.0e-2,
+        weight=-1.5e-2,
         params={**_ROUGHNESS_KWARGS, "asset_cfg": _WHEEL_JOINTS},
     )
     rough_wheel_foot_clearance = RewTerm(
@@ -539,6 +527,7 @@ class RewardsCfg:
             **_ROUGHNESS_KWARGS,
             "clearance_sensor_names": C.WHEEL_HEIGHT_SENSORS,
             "clearance_grid_shape": C.WHEEL_HEIGHT_GRID_SHAPE,
+            "clearance_max_distance": C.WHEEL_HEIGHT_MAX_DISTANCE,
             "contact_sensor_cfg": _WHEEL_CONTACTS,
             "command_name": C.COMMAND_NAME,
             "base_target_height": 0.03,
@@ -558,6 +547,7 @@ class RewardsCfg:
             "command_threshold": 0.05,
         },
     )
+    # -- terrain-gated: wheeled motion elsewhere
     non_rough_wheel_lateral_symmetry = RewTerm(
         func=mdp.non_rough_wheel_lateral_symmetry,
         weight=0.5,
@@ -568,17 +558,20 @@ class RewardsCfg:
         weight=-50.0,
         params={**_ROUGHNESS_KWARGS, "asset_cfg": _WHEEL_BODIES},
     )
+    non_rough_flat_orientation = RewTerm(
+        func=mdp.non_rough_flat_orientation,
+        weight=-10.0,
+        params={**_ROUGHNESS_KWARGS, "roll_weight": 2.0, "pitch_weight": 1.0},
+    )
     standing_forward_wheel_air_time = RewTerm(
         func=mdp.standing_forward_wheel_air_time,
-        weight=-4.0,
+        weight=-10.0,
         params={
             **_ROUGHNESS_KWARGS,
             "contact_sensor_cfg": _WHEEL_CONTACTS,
             "command_name": C.COMMAND_NAME,
             "max_time": 0.5,
             "air_time_offset": 0.05,
-            "standing_scale": 2.5,
-            "forward_scale": 2.0,
         },
     )
 
@@ -592,8 +585,27 @@ class TerminationsCfg:
         params={"limit_angle": C.FELL_OVER_LIMIT_ANGLE_INITIAL},
     )
     illegal_contact = DoneTerm(
-        func=mdp.illegal_contact,
-        params={"sensor_cfg": _ILLEGAL_CONTACTS, "threshold": C.ILLEGAL_CONTACT_FORCE_THRESHOLD},
+        func=mdp.illegal_terrain_contact,
+        params={"sensor_cfg": _ILLEGAL_CONTACTS, "force_threshold": C.ILLEGAL_CONTACT_FORCE_THRESHOLD},
+    )
+    world_command_tracking_failure = DoneTerm(
+        func=mdp.WorldCommandTrackingFailure,
+        params={
+            "command_name": C.COMMAND_NAME,
+            "contact_sensor_cfg": _WHEEL_CONTACTS,
+            "activation_step": C.WORLD_COMMAND_TRACKING_ACTIVATION_STEPS,
+            "command_norm_threshold": 0.35,
+            "progress_deficit_threshold": 0.45,
+            "min_progress_ratio": 0.55,
+            "progress_duration_s": 0.4,
+            "actual_speed_threshold": 0.2,
+            "direction_angle_threshold_deg": 70.0,
+            "direction_duration_s": 0.3,
+            "heading_error_threshold_deg": 45.0,
+            "heading_duration_s": 0.6,
+            "heading_alignment_gate_deg": 45.0,
+            "command_grace_s": 2.5,
+        },
     )
     # Leaving the terrain is not a failure, so it truncates rather than terminates.
     out_of_terrain_bounds = DoneTerm(func=mdp.out_of_terrain_bounds, params={"margin": 0.05}, time_out=True)
@@ -645,10 +657,7 @@ class WF_TRON1B_BaseEnvCfg(ManagerBasedRLEnvCfg):
             self.scene.wheel_height_scan_L.update_period = self.decimation * self.sim.dt
         if self.scene.wheel_height_scan_R is not None:
             self.scene.wheel_height_scan_R.update_period = self.decimation * self.sim.dt
-        if self.scene.wheel_contact_forces is not None:
-            self.scene.wheel_contact_forces.update_period = self.sim.dt
-        if self.scene.illegal_contact_forces is not None:
-            self.scene.illegal_contact_forces.update_period = self.sim.dt
+        self.scene.contact_forces.update_period = self.sim.dt
 
         if self.scene.terrain.terrain_generator is not None:
             self.scene.terrain.terrain_generator.curriculum = True

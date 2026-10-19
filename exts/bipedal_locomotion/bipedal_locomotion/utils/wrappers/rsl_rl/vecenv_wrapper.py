@@ -14,30 +14,32 @@ translation.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import gymnasium as gym
 import torch
 from rsl_rl.env import VecEnv
 from tensordict import TensorDict
 
-from isaaclab.envs import ManagerBasedRLEnv, ManagerBasedRLEnvCfg
-from isaaclab.managers import ActionManager
+if TYPE_CHECKING:
+    from isaaclab.envs import ManagerBasedRLEnv, ManagerBasedRLEnvCfg
+    from isaaclab.managers import ActionManager
 
 
-def get_applied_actions(action_manager: ActionManager) -> torch.Tensor:
-    """Concatenate the policy-space action each term actually applied this step.
+def get_applied_actions(action_manager: ActionManager, dones: torch.Tensor | None = None) -> torch.Tensor:
+    """Concatenate, in action-vector order, the policy-space action each term actually applied this step.
 
-    Terms that model actuation delay expose ``applied_action``: the mean, over the
-    physics substeps of one environment step, of the *raw* (pre-scale) action that
-    was really sent to the simulator. Terms without delay applied their raw action
-    unchanged, so ``raw_actions`` is the correct fallback.
-
-    Concatenation follows ``action_manager.active_terms`` order, matching the layout
-    of the action vector the policy produces.
+    Delayed terms expose ``applied_action`` (the mean raw action executed over the step's physics
+    substeps); other terms applied ``raw_actions`` unchanged. Environments in ``dones`` have already
+    been reset, so their pre-reset ``terminal_applied_action`` snapshot is used instead.
     """
     chunks = []
     for name in action_manager.active_terms:
         term = action_manager.get_term(name)
-        chunks.append(getattr(term, "applied_action", term.raw_actions))
+        applied = getattr(term, "applied_action", term.raw_actions)
+        if dones is not None and hasattr(term, "terminal_applied_action"):
+            applied = torch.where(dones.bool().unsqueeze(-1), term.terminal_applied_action, applied)
+        chunks.append(applied)
     return torch.cat(chunks, dim=-1)
 
 
@@ -105,6 +107,8 @@ class RslRlVecEnvWrapper(VecEnv):
         if self.clip_actions is not None:
             actions = torch.clamp(actions, -self.clip_actions, self.clip_actions)
         obs_dict, rew, terminated, truncated, extras = self.env.step(actions)
+        # Metrics staged by reward / termination terms (see `mdp.log_metric`).
+        extras.setdefault("log", {}).update(self.unwrapped.__dict__.pop("_step_metrics", {}))
         dones = (terminated | truncated).to(dtype=torch.long)
         # Only expose time-outs when the task is treated as infinite-horizon, i.e. when a
         # time-out is an artifact of episode chunking and the value function should
@@ -139,5 +143,5 @@ class WheeledLeggedRslRlVecEnvWrapper(RslRlVecEnvWrapper):
 
     def step(self, actions: torch.Tensor) -> tuple[TensorDict, torch.Tensor, torch.Tensor, dict]:
         obs, rew, dones, extras = super().step(actions)
-        extras["applied_actions"] = get_applied_actions(self.unwrapped.action_manager)
+        extras["applied_actions"] = get_applied_actions(self.unwrapped.action_manager, dones)
         return obs, rew, dones, extras

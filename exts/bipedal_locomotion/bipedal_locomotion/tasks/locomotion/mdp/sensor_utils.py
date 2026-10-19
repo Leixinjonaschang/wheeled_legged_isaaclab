@@ -1,12 +1,13 @@
-"""Adapters from Isaac Lab ray-caster output to the ``[B, F, N]`` clearance layout.
+"""Adapters from Isaac Lab sensor data to the layouts the mjlab-derived terms expect.
 
-mjlab's ``TerrainHeightSensor`` binds several frames (one per wheel) to a single sensor
-and reports ``[B, F, N]`` clearance samples directly. Isaac Lab's :class:`RayCaster`
-binds one prim per environment and reports ``[B, N, 3]`` world-frame hit positions, so
-the per-wheel scans are configured as *separate* sensors and stacked back together here.
+Height scans: mjlab's ``TerrainHeightSensor`` binds several frames (one per wheel) to one sensor and
+reports ``[B, F, N]`` clearance samples; Isaac Lab's :class:`RayCaster` binds one prim per
+environment, so each frame is a separate sensor and they are stacked back here. Clearance is
+``frame_z - hit_z`` (positive downward), with missed rays reported as ``max_distance``.
 
-The clearance convention matches mjlab: ``frame_z - hit_z``, i.e. how far below the
-sensor origin the ground is, positive downward.
+Contacts: mjlab's contact sensors filter contacts by partner (terrain / robot subtree). Here one
+robot-wide :class:`ContactSensor` is filtered on the terrain mesh: its force matrix is the terrain
+contact and the remainder of the net force is robot-on-robot contact.
 """
 
 from __future__ import annotations
@@ -19,26 +20,42 @@ from .kernels import heights_from_raycast
 
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
+    from isaaclab.managers import SceneEntityCfg
 
-__all__ = ["clearance_samples", "contact_state", "hit_points_with_mask", "stack_clearance_samples"]
+__all__ = [
+    "clearance_samples",
+    "contact_state",
+    "hit_points_with_mask",
+    "self_contact_forces",
+    "stack_clearance_samples",
+    "terrain_forces",
+]
 
 
-def contact_state(env: ManagerBasedRLEnv, sensor_cfg) -> torch.Tensor:
-    """Boolean contact state for the selected bodies, shape ``[B, num_bodies]``.
+def terrain_forces(env: ManagerBasedRLEnv, sensor_cfg: SceneEntityCfg, history: bool = False) -> torch.Tensor:
+    """World-frame terrain contact force per selected body, ``[B, N, 3]`` (``[B, H, N, 3]`` with history)."""
+    data = env.scene[sensor_cfg.name].data
+    forces = data.force_matrix_w_history if history else data.force_matrix_w
+    return forces.sum(dim=-2)[..., sensor_cfg.body_ids, :]
 
-    Uses the sensor's own ``cfg.force_threshold`` rather than a per-term parameter. That
-    threshold is what the sensor already uses internally to maintain ``current_air_time``,
-    so reading it here keeps every contact-based term agreeing with the sensor's air-time
-    bookkeeping. Two independent thresholds would drift apart the moment one is tuned,
-    and the resulting disagreement -- one term calling a wheel airborne while another
-    calls it planted -- is invisible in the reward totals.
+
+def self_contact_forces(env: ManagerBasedRLEnv, sensor_cfg: SceneEntityCfg) -> torch.Tensor:
+    """History of the non-terrain (robot-on-robot) contact force per selected body, ``[B, H, N, 3]``."""
+    data = env.scene[sensor_cfg.name].data
+    return (data.net_forces_w_history - data.force_matrix_w_history.sum(dim=-2))[..., sensor_cfg.body_ids, :]
+
+
+def contact_state(env: ManagerBasedRLEnv, sensor_cfg: SceneEntityCfg) -> torch.Tensor:
+    """Terrain contact per selected body (mjlab's ``found > 0``), ``[B, N]``.
+
+    Uses the sensor's own ``force_threshold``, the one it maintains ``current_air_time`` with, so
+    every contact-based term agrees with the sensor's air-time bookkeeping.
     """
-    sensor = env.scene[sensor_cfg.name]
-    forces = sensor.data.net_forces_w[:, sensor_cfg.body_ids]
-    return torch.norm(forces, dim=-1) > sensor.cfg.force_threshold
+    threshold = env.scene[sensor_cfg.name].cfg.force_threshold
+    return torch.norm(terrain_forces(env, sensor_cfg), dim=-1) > threshold
 
-# Cached subsample indices, keyed by (total, max_points, device). Recomputing a linspace
-# every step for every environment shows up in the profile at 2048 environments.
+
+# Cached subsample indices, keyed by (total, max_points, device).
 _SUBSAMPLE_CACHE: dict[tuple[int, int, str], torch.Tensor] = {}
 
 
@@ -54,44 +71,24 @@ def hit_points_with_mask(
     sensor_names: tuple[str, ...],
     max_points: int = 32,
 ) -> tuple[torch.Tensor, torch.Tensor]:
-    """Gather ray hit positions and a validity mask from one or more ray-casters.
-
-    Args:
-        max_points: Per-sensor cap on the number of points, evenly subsampled. A plane fit
-            gains nothing from 121 coplanar points over 32, and the covariance is the one
-            per-step cost here that scales with ray count.
-
-    Returns:
-        ``(points [B, N, 3], valid [B, N])``. Rays that hit nothing are marked invalid
-        rather than given a substitute position -- see
-        :func:`~.kernels.terrain_normal_from_points`.
-    """
+    """Ray hit positions ``[B, N, 3]`` and validity ``[B, N]``, at most ``max_points`` per sensor."""
     all_points, all_valid = [], []
     for name in sensor_names:
-        sensor = env.scene[name]
-        hits = sensor.data.ray_hits_w  # [B, N, 3]
+        hits = env.scene[name].data.ray_hits_w  # [B, N, 3]
         valid = torch.isfinite(hits).all(dim=-1)
-        num_rays = hits.shape[1]
-        if num_rays > max_points:
-            idx = _subsample_indices(num_rays, max_points, hits.device)
-            hits = hits[:, idx]
-            valid = valid[:, idx]
+        if hits.shape[1] > max_points:
+            idx = _subsample_indices(hits.shape[1], max_points, hits.device)
+            hits, valid = hits[:, idx], valid[:, idx]
         all_points.append(hits)
         all_valid.append(valid)
     return torch.cat(all_points, dim=1), torch.cat(all_valid, dim=1)
 
 
 def clearance_samples(env: ManagerBasedRLEnv, sensor_name: str, max_distance: float) -> torch.Tensor:
-    """Clearance below one ray-caster, shape ``[B, 1, N]``.
-
-    Isaac Lab reports a missed ray as a non-finite hit position. Those are replaced by
-    ``max_distance`` so downstream statistics stay finite; see
-    :func:`~.kernels.heights_from_raycast`.
-    """
-    sensor = env.scene[sensor_name]
-    hits_w = sensor.data.ray_hits_w  # [B, N, 3]
-    frame_z = sensor.data.pos_w[:, 2].view(-1, 1, 1)  # [B, 1, 1]
-    hit_z = hits_w[..., 2].unsqueeze(1)  # [B, 1, N]
+    """Clearance below one ray-caster, ``[B, 1, N]``. Missed rays (non-finite hits) read ``max_distance``."""
+    data = env.scene[sensor_name].data
+    frame_z = data.pos_w[:, 2].view(-1, 1, 1)
+    hit_z = data.ray_hits_w[..., 2].unsqueeze(1)
     miss = ~torch.isfinite(hit_z)
     return heights_from_raycast(frame_z, torch.nan_to_num(hit_z, nan=0.0, posinf=0.0, neginf=0.0), miss, max_distance)
 
@@ -101,9 +98,5 @@ def stack_clearance_samples(
     sensor_names: tuple[str, ...],
     max_distance: float,
 ) -> torch.Tensor:
-    """Clearance below several ray-casters, stacked into ``[B, F, N]``.
-
-    ``sensor_names`` order defines the frame order, so it must match the wheel order the
-    contact and reward terms assume (left, then right).
-    """
+    """Clearance below several ray-casters, ``[B, F, N]``; ``sensor_names`` fixes the frame order."""
     return torch.cat([clearance_samples(env, name, max_distance) for name in sensor_names], dim=1)

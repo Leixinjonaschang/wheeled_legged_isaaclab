@@ -14,8 +14,8 @@ import torch
 from bipedal_locomotion.utils.math import quat_apply_inverse
 from isaaclab.managers import SceneEntityCfg
 
-from .kernels import encode_contact_forces, terrain_roughness_from_height_samples
-from .sensor_utils import contact_state, stack_clearance_samples
+from .kernels import encode_contact_forces, smoothstep_gate, terrain_roughness_from_height_samples
+from .sensor_utils import contact_state, stack_clearance_samples, terrain_forces
 
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
@@ -27,6 +27,7 @@ __all__ = [
     "wheel_contact",
     "wheel_contact_forces",
     "wheel_height",
+    "wheel_roughness_gate",
 ]
 
 
@@ -47,12 +48,7 @@ def base_link_lin_vel(
 
 
 def wheel_contact(env: ManagerBasedRLEnv, sensor_cfg: SceneEntityCfg) -> torch.Tensor:
-    """1.0 per wheel body currently in contact. Shape ``[B, num_wheels]``.
-
-    Uses the net contact force rather than a ground-filtered force matrix. On this task
-    the wheels only ever touch the terrain, so the two agree, and the net force avoids
-    depending on filtered contact reporting working against instanced terrain meshes.
-    """
+    """1.0 per wheel touching the terrain, ``[B, num_wheels]`` (mjlab ``foot_contact``)."""
     return contact_state(env, sensor_cfg).float()
 
 
@@ -61,18 +57,10 @@ def wheel_contact_forces(
     sensor_cfg: SceneEntityCfg,
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
 ) -> torch.Tensor:
-    """Wheel contact forces in the base frame, log-compressed. Shape ``[B, num_wheels * 3]``.
-
-    Expressed in the base frame so the signal is invariant to the robot's heading, and
-    log-compressed because impact forces are orders of magnitude larger than the
-    steady-state load.
-    """
-    sensor = env.scene[sensor_cfg.name]
-    asset = env.scene[asset_cfg.name]
-    forces_w = sensor.data.net_forces_w[:, sensor_cfg.body_ids]  # [B, N, 3]
-    root_quat_w = asset.data.root_link_quat_w[:, None, :].expand(-1, forces_w.shape[1], -1)
-    forces_b = quat_apply_inverse(root_quat_w, forces_w)
-    return encode_contact_forces(forces_b)
+    """Log-compressed wheel-terrain contact forces in the base frame, ``[B, num_wheels * 3]``."""
+    forces_w = terrain_forces(env, sensor_cfg)  # [B, N, 3]
+    root_quat_w = env.scene[asset_cfg.name].data.root_link_quat_w[:, None, :].expand(-1, forces_w.shape[1], -1)
+    return encode_contact_forces(quat_apply_inverse(root_quat_w, forces_w))
 
 
 def terrain_height_scan(
@@ -111,22 +99,38 @@ def terrain_roughness_indicator(
     env: ManagerBasedRLEnv,
     sensor_names: tuple[str, ...],
     wheel_radius: float = 0.127,
-    gate_min: float = 0.0,
-    gate_max: float = 0.5,
+    gate_min: float = 0.10,
+    gate_max: float = 0.40,
     grid_shape: tuple[int, int] | None = None,
-    max_distance: float = 1.0,
+    max_distance: float = 10.0,
 ) -> torch.Tensor:
-    """Scalar in [0, 1] telling the critic how rough the ground under the robot is.
-
-    Same quantity that gates the rough-terrain rewards, exposed as an observation so the
-    critic can attribute reward changes to the terrain rather than to the policy.
-    """
-    samples = stack_clearance_samples(env, sensor_names, max_distance)
+    """Roughness gate of the scanned terrain, in [0, 1], ``[B, 1]``: the quantity gating the rough-terrain rewards."""
     stats = terrain_roughness_from_height_samples(
-        samples,
+        stack_clearance_samples(env, sensor_names, max_distance),
         wheel_radius=wheel_radius,
         gate_min=gate_min,
         gate_max=gate_max,
         grid_shape=grid_shape,
     )
     return stats.gate.unsqueeze(-1)
+
+
+def wheel_roughness_gate(
+    env: ManagerBasedRLEnv,
+    sensor_names: tuple[str, ...],
+    wheel_radius: float = 0.127,
+    gate_min: float = 0.10,
+    gate_max: float = 0.40,
+    grid_shape: tuple[int, int] | None = None,
+    max_distance: float = 1.0,
+) -> torch.Tensor:
+    """Per-wheel roughness gates of the wheel height scans, ``[B, num_wheels]`` ordered like ``sensor_names``."""
+    stats = terrain_roughness_from_height_samples(
+        stack_clearance_samples(env, sensor_names, max_distance),
+        wheel_radius=wheel_radius,
+        gate_min=gate_min,
+        gate_max=gate_max,
+        grid_shape=grid_shape,
+    )
+    return smoothstep_gate(stats.foot_roughness, gate_min, gate_max)
+
