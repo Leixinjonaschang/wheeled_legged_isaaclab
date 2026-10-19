@@ -63,10 +63,6 @@ class WheeledUniformVelocityCommandCfg(CommandTermCfg):
     a wheeled robot should answer by rolling rather than stepping, and uniform sampling
     almost never produces them."""
 
-    init_velocity_prob: float = 0.0
-    """Probability of starting an episode already at the commanded velocity, so the
-    policy is not trained almost exclusively on the start-up transient."""
-
     @configclass
     class Ranges:
         """Uniform distribution ranges for the velocity command."""
