@@ -49,7 +49,7 @@
 | `mjlab-port/depth-task` | OursGP（深度 + latent dynamics predictor）、运行时验证 |
 | `mjlab-port/docs` | README / CHANGELOG |
 | `mjlab-port/final-cleanup` | 最终 code review 的清理（过时注释、死代码、重复参数），play 的编码器偏差与 ONNX 元数据修复 |
-| `mjlab-port/parity-fixes` | 最终行为对齐 review 的修复 |
+| `mjlab-port/parity-fixes` | 最终行为对齐 review 的修复（D35–D42） |
 
 ## 4. 运行环境
 
@@ -110,3 +110,11 @@
 | D32 | 与 mjlab 的训练曲线对比口径 | BlindGP：同一台机器上 mjlab HEAD 与 Isaac Lab 各跑 2048 env；OursGP：以论文 3 个 seed（`ours_seed42/44/46`）为参照带，Isaac Lab 单卡 2048 env、seed 42。只比 episode 长度、地形等级、奖励和各项 loss，不比终止项占比 | mjlab 4096 env 在这台共享 GPU 上 OOM。论文 run 是 2 GPU × 2048 env（`env.yaml` 里的 2048 是每个 rank 的，曲线只来自 rank 0），除 `num_envs`、seed 和运行时回填字段外与 mjlab HEAD 的配置逐项一致；seed 间差异很大（it400 地形等级 0.67–1.85），所以用参照带而不是单个 seed。Isaac Lab 记录的是"各 env 最近一个 episode 的终止原因"占比（每个 env 计一次），mjlab 记录每步 reset 的计数（每个 episode 计一次，失败多的 env 权重更大），两者口径不同。 |
 | D33 | sim2sim 中剩余的差异 | 记为仿真器间固有差异，不做修正 | 用 mjlab 训好的 OursGP：teacher 摔倒率 0.48 vs 0.46 次/env-min（持平），student 1.49 vs 0.79；同一 teacher 轨迹上 student 的潜变量/速度/粗糙度估计两边一致，固定位姿下深度（≤8.3e-6 m）与本体观测完全一致，故 student 差距是 MuJoCo 蒸馏出的 student 对 PhysX 动力学偏移更敏感的闭环效应。另：yaw 角速度跟踪误差 Isaac Lab 高约 20%（物理/接触模型差异）。 |
 | D34 | TRON2A 时代遗留的 MDP 代码 | 删除 `mdp/{observations,rewards,events,curriculums}.py`、gait command、`actuators/`（延迟执行器）和 `utils/math.py` 中只被它们使用的函数 | TRON2A 任务早已注销，这些代码无人使用；唯一与 WF-TRON1B 配置重名的 `generated_commands` 与 Isaac Lab 内置实现完全相同。需要时可从 git 历史恢复。TRON2A 的 USD 资产（`assets/usd/{SF,WF}_TRON2A`，136 MB）同样无人引用，但属于原公开发布内容，未删。 |
+| D35 | 轮子高度扫描：射线起点落在地形内部 | 射线从轮心上方 1 m 竖直向下投射，读数 = clamp(轮心 z − 命中 z, 0, 1 m)，未命中读 1 m | mjlab 的 `TerrainHeightSensor` 从轮心向下投射，起点落在 box 内时命中背面并读 0；原实现会命中 box 底面（读到地板的距离，台阶在扫描里"消失"），在开放的 hfield 曲面下则 miss 读 1 m。实测轮子贴着高于轮心的台阶时，台阶上方的样本由 0.127 m 变为 0，与 mjlab 一致。影响 `rough_wheel_foot_clearance`、critic/teacher 的 `wheel_height` 和 OursGP 的 `wheel_roughness` 目标。残余差异：hfield 子地形上轮心低于曲面时（只在高行的 discrete_obstacles 出现），mjlab 读到 hfield 基准面的距离，这里读 0；mjlab"一帧全部 miss"的回退规则在这些地形上不会触发。 |
+| D36 | `wheel_contact_forces` 的方向与摩擦 | 报告轮子作用在地形上的力（法向 + 摩擦，与 mjlab `netforce` 同号）；摩擦用接触传感器 PhysX 视图的 `get_friction_data` 逐接触点读取、按 body 求和 | Isaac Lab 的接触传感器只给作用在轮子上的法向力：符号相反，且没有牵引 / 侧向摩擦（mjlab 里可达数十到上百 N）。实测法向 + 摩擦与由动量变化反推的地面反力相差不到 0.5 N（静止与加速两种工况）。多一次阻塞式读取（接触传感器每个子步本来就有同类读取），开销在共享 GPU 的测量噪声内。 |
+| D37 | 非法接触 / 自碰撞的 10 N 阈值作用于哪种力 | 每个 body 的地形法向合力（自碰撞为 net − matrix） | mjlab 用 `num_slots=1`，取任意一个接触点的全力（法向 + 摩擦）；该值依赖接触排序，PhysX 也不提供逐接触的全力。只在多点轻接触或摩擦主导接触的边界情况下不同（`illegal_contact` 终止、`illegal_ground_contact` / `self_collisions` 奖励）。 |
+| D38 | 奖励读到的是哪一步的射线扫描 | 本步物理之后的扫描（与观测相同） | mjlab 的 `sense()` 在奖励之后运行，奖励用的是上一步（20 ms 前）的扫描，观测用的是新的。复现需要另存一份上一步的扫描，收益很小。涉及 upright、base_height 和 7 个粗糙度门控项。 |
+| D39 | Isaac Lab 传感器的 float32 时钟 | 所有传感器 `update_period=0`；`soft_landing` 的首次触地判定用 `abs_tol = 0.5·physics_dt` | Isaac Lab 每个 env 的传感器时钟是 float32：`update_period` 为 0.02 / 0.005 s 时，episode 第 16 s 之后会隔步漏掉高度扫描刷新和接触历史子步（play 的长 episode 更严重）；默认容差 1e-8 使起于一步中第一个子步的着地在 episode 的大部分时间里都识别不到（按 float32 复现约占全部着地的 18%）。射线传感器仍在首次读取时惰性计算，每步一次，开销不变。 |
+| D40 | reset / push 写入的根速度 | 写 root link 速度（与 mjlab 相同） | Isaac Lab 内置事件写的是 COM 速度；基座 COM 距 link 原点约 0.17 m，有角速度扰动时线速度相差最多约 0.07 m/s（reset）/ 0.10 m/s（push）。 |
+| D41 | play 的环境数 | 32 | 便于观察；做统计时用 `--num_envs`。mjlab play 沿用 4096。env 很少时"每列至少一个"会让第一个 episode 的地形分布偏平，之后 `randomize_terrain` 均匀重抽。 |
+| D42 | 其它细微差异 | (a)(d) 不处理；(b)(c) 按 mjlab 处理 | (a) 每个 episode 的第一个指令比 mjlab 短一步（0.02 s；mjlab 对刚 reset 的 env 传 dt=0）。(b) 非有限奖励在 RSL-RL wrapper 中置 0（mjlab 逐项置 0），只在物理发散时起作用。(c) 课程 `fell_over_limit_angle` 记录为 `Curriculum/fell_over_limit_angle/limit_angle`，与 mjlab 同名。(d) `soft_landing`（权重 −3e-5）用着地时的法向力，mjlab 用含摩擦的全力。 |
