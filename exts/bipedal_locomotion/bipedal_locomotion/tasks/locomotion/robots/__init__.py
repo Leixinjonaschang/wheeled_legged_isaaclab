@@ -34,3 +34,15 @@ _register(
     "WF_TRON1B_RepTSLinVelEnvCfg_PLAY",
     "wf_tron1b_rep_ts_lin_vel_runner_cfg",
 )
+
+# mjlab: Mjlab-Velocity-Rough-WF-Tron1B-RepTS-LinVel-Depth-Predict-OursGP
+_register(
+    "Isaac-Limx-WF-TRON1B-Velocity-Rough-RepTS-LinVel-Depth-Predict-OursGP-v0",
+    "WF_TRON1B_RepTSLinVelDepthEnvCfg",
+    "wf_tron1b_rep_ts_lin_vel_depth_predict_runner_cfg",
+)
+_register(
+    "Isaac-Limx-WF-TRON1B-Velocity-Rough-RepTS-LinVel-Depth-Predict-OursGP-Play-v0",
+    "WF_TRON1B_RepTSLinVelDepthEnvCfg_PLAY",
+    "wf_tron1b_rep_ts_lin_vel_depth_predict_runner_cfg",
+)

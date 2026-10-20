@@ -13,12 +13,14 @@ group                    width        consumer
 ``privileged_encoder``   160          teacher encoder (+ ``dynamics_context``)
 ``wheel_roughness``      2            depth model's roughness head
 ``dynamics_context``     87           critic / teacher encoder
+``depth_camera``         1 x 30 x 45  depth student encoder (depth variant only)
 =======================  ===========  =============================================
 """
 
 import math
 
-from bipedal_locomotion.assets.config.wheelfoot_tron1b_cfg import WHEELFOOT_TRON1B_CFG
+from bipedal_locomotion.assets.config.wheelfoot_tron1b_cfg import MESH_DIR, WHEELFOOT_TRON1B_CFG
+from bipedal_locomotion.sensors import SelfOccludingRayCasterCameraCfg
 from bipedal_locomotion.tasks.locomotion import mdp
 from bipedal_locomotion.terrains import ProportionalTerrainImporter
 from isaaclab.envs import ManagerBasedRLEnvCfg
@@ -626,6 +628,71 @@ class CurriculumCfg:
         },
     )
     terrain_levels = CurrTerm(func=mdp.terrain_levels_vel, params={"command_name": C.COMMAND_NAME})
+
+
+##
+# Depth camera (mjlab ``make_*(depth=True, async_depth=True)``)
+##
+
+_DEPTH_CAMERA = SceneEntityCfg(C.DEPTH_CAMERA_SENSOR)
+_DEPTH_FOCAL = 0.5 * C.DEPTH_CAMERA_HEIGHT / math.tan(math.radians(C.DEPTH_CAMERA_FOVY_DEG) / 2)
+
+
+@configclass
+class WF_TRON1B_DepthSceneCfg(WF_TRON1B_SceneCfg):
+    """Adds the MJCF's ``d435`` on base_Link. It also sees the robot's wheels and knees, as mjlab's camera does."""
+
+    depth_camera = SelfOccludingRayCasterCameraCfg(
+        prim_path="{ENV_REGEX_NS}/Robot/" + C.BASE_BODY,
+        mesh_prim_paths=["/World/ground"],
+        offset=SelfOccludingRayCasterCameraCfg.OffsetCfg(
+            pos=C.DEPTH_CAMERA_POS, rot=C.DEPTH_CAMERA_ROT, convention="opengl"
+        ),
+        pattern_cfg=patterns.PinholeCameraPatternCfg.from_intrinsic_matrix(
+            [_DEPTH_FOCAL, 0.0, C.DEPTH_CAMERA_WIDTH / 2, 0.0, _DEPTH_FOCAL, C.DEPTH_CAMERA_HEIGHT / 2, 0.0, 0.0, 1.0],
+            C.DEPTH_CAMERA_WIDTH,
+            C.DEPTH_CAMERA_HEIGHT,
+        ),
+        data_types=["distance_to_image_plane"],
+        self_occlusion_links=C.DEPTH_CAMERA_VISIBLE_LINKS,
+        mesh_dir=MESH_DIR,
+    )
+
+
+@configclass
+class DepthObservationsCfg(ObservationsCfg):
+    @configclass
+    class DepthCameraCfg(ObsGroup):
+        """Normalised depth on a 30 Hz capture clock with a per-env system delay, ``[B, 1, 30, 45]``."""
+
+        depth_camera = ObsTerm(
+            func=mdp.AsyncDepthBuffer,
+            params={
+                "sensor_cfg": _DEPTH_CAMERA,
+                "capture_frequency_hz": C.DEPTH_CAPTURE_FREQUENCY_HZ,
+                "system_delay_range_s": C.DEPTH_SYSTEM_DELAY_RANGE_S,
+                "left_crop": C.DEPTH_LEFT_CROP,
+                "depth_min_m": C.DEPTH_MIN_M,
+                "depth_max_m": C.DEPTH_MAX_M,
+            },
+        )
+
+    depth_camera: DepthCameraCfg = DepthCameraCfg()
+
+
+@configclass
+class DepthEventsCfg(EventsCfg):
+    # mjlab's cam_pos / cam_pitch / cam_fovy: per-reset camera calibration error.
+    depth_camera_calibration = EventTerm(
+        func=mdp.randomize_depth_camera,
+        mode="reset",
+        params={
+            "sensor_cfg": _DEPTH_CAMERA,
+            "position_range": C.DEPTH_CAMERA_POSITION_DELTA_RANGE_M,
+            "pitch_range": C.DEPTH_CAMERA_PITCH_DELTA_RANGE_RAD,
+            "fovy_range_deg": C.DEPTH_CAMERA_FOVY_DELTA_RANGE_DEG,
+        },
+    )
 
 
 ##

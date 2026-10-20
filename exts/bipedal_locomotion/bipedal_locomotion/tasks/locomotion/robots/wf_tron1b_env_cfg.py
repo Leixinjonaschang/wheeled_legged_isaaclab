@@ -6,7 +6,12 @@ Play configs relax whatever exists only to shape training (mjlab ``apply_play_ov
 import math
 
 from bipedal_locomotion.tasks.locomotion.cfg.WF_TRON1B import constants as C
-from bipedal_locomotion.tasks.locomotion.cfg.WF_TRON1B.wf_tron1b_base_env_cfg import WF_TRON1B_BaseEnvCfg
+from bipedal_locomotion.tasks.locomotion.cfg.WF_TRON1B.wf_tron1b_base_env_cfg import (
+    DepthEventsCfg,
+    DepthObservationsCfg,
+    WF_TRON1B_BaseEnvCfg,
+    WF_TRON1B_DepthSceneCfg,
+)
 from bipedal_locomotion.tasks.locomotion.mdp import wheeled_events
 from isaaclab.envs.mdp.actions.actions_cfg import JointPositionActionCfg, JointVelocityActionCfg
 from isaaclab.managers import EventTermCfg as EventTerm
@@ -74,3 +79,23 @@ class WF_TRON1B_RepTSLinVelEnvCfg_PLAY(WF_TRON1B_RepTSLinVelEnvCfg):
     def __post_init__(self):
         super().__post_init__()
         _apply_play_overrides(self)
+
+
+@configclass
+class WF_TRON1B_RepTSLinVelDepthEnvCfg(WF_TRON1B_BaseEnvCfg):
+    """mjlab ``wf_tron1b_rough_rep_ts_lin_vel_depth_env_cfg()``: the base config plus the depth camera, its async
+    buffer and its calibration randomisation."""
+
+    scene: WF_TRON1B_DepthSceneCfg = WF_TRON1B_DepthSceneCfg(num_envs=C.NUM_ENVS, env_spacing=2.5)
+    observations: DepthObservationsCfg = DepthObservationsCfg()
+    events: DepthEventsCfg = DepthEventsCfg()
+
+
+@configclass
+class WF_TRON1B_RepTSLinVelDepthEnvCfg_PLAY(WF_TRON1B_RepTSLinVelDepthEnvCfg):
+    def __post_init__(self):
+        super().__post_init__()
+        _apply_play_overrides(self)
+        # As mjlab: no camera calibration error and no depth system delay.
+        self.events.depth_camera_calibration = None
+        self.observations.depth_camera.depth_camera.params["system_delay_range_s"] = (0.0, 0.0)

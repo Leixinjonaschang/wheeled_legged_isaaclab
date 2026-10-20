@@ -98,17 +98,18 @@ class WheeledLeggedVelocityOnPolicyRunner(OnPolicyRunner):
 
         # ONNX export is best-effort: a broken export must not lose a training run.
         policy_dir, filename, onnx_path = self._get_export_paths(path)
+        logger_type = getattr(self.logger, "logger_type", None)  # only set once learn() starts logging
         try:
             self.export_policy_to_onnx(str(policy_dir), filename)
             run_name = "local"
-            if self.logger.logger_type == "wandb":
+            if logger_type == "wandb":
                 import wandb
 
                 if wandb.run is not None:
                     run_name = wandb.run.name
             metadata = get_wheeled_legged_metadata(self.env.unwrapped, run_name, self.alg.get_policy())
             attach_metadata_to_onnx(str(onnx_path), metadata)
-            if self.logger.logger_type == "wandb" and self.cfg.get("upload_model"):
+            if logger_type == "wandb" and self.cfg.get("upload_model"):
                 import wandb
 
                 wandb.save(str(onnx_path), base_path=str(policy_dir))

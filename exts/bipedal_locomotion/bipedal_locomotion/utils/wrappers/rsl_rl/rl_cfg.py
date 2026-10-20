@@ -179,3 +179,50 @@ class RslRlRepresentationVelocityTeacherStudentPpoAlgorithmCfg(RslRlPpoAlgorithm
     lin_vel_loss_coef: float = 1.0
     roughness_loss_coef: float = 0.2
     class_name: str = "RepresentationVelocityTeacherStudentPPO"
+
+
+@dataclass
+class RslRlDepthRepresentationVelocityModelCfg(RslRlRepresentationVelocityModelCfg):
+    """The velocity representation model with a depth CNN + GRU in the student encoder."""
+
+    depth_feature_dim: int = 64
+    depth_gru_hidden_dim: int = 128
+    depth_channels: tuple[int, ...] = (16, 32, 32)
+    depth_conv_strides: tuple[int, ...] = (2, 2, 1)
+    class_name: str = "DepthRepresentationVelocityActorCritic"
+
+
+@dataclass
+class RslRlDepthRepresentationVelocityPredictorModelCfg(RslRlDepthRepresentationVelocityModelCfg):
+    """The depth model with multi-horizon latent-and-velocity dynamics prediction."""
+
+    latent_dynamics_hidden_dims: tuple[int, ...] = (128, 256, 256, 128)
+    latent_dynamics_horizons: tuple[int, ...] = (1, 5)
+    class_name: str = (
+        "rsl_rl.models.depth_representation_velocity_predictor_actor_critic:"
+        "DepthRepresentationVelocityPredictorActorCritic"
+    )
+
+
+@dataclass
+class RslRlRepresentationVelocityPredictorTeacherStudentPpoAlgorithmCfg(
+    RslRlRepresentationVelocityTeacherStudentPpoAlgorithmCfg
+):
+    """Velocity representation PPO with latent-and-velocity dynamics prediction."""
+
+    predictor_learning_rate: float = 1.0e-3
+    latent_dynamics_loss_coef: float = 3.0
+    latent_dynamics_velocity_loss_coef: float = 1.0
+    latent_dynamics_use_ema_target: bool = False
+    latent_dynamics_ema_decay: float = 0.99
+    latent_dynamics_horizons: tuple[int, ...] = (1, 5)
+    latent_dynamics_horizon_weights: tuple[float, ...] = (1.0, 0.5)
+    latent_dynamics_detach_source: bool = False
+    latent_rollout_horizon: int = 5
+    latent_rollout_loss_coef: float = 0.75
+    num_latent_dynamics_epochs: int = 1
+    num_latent_dynamics_mini_batches: int = 4
+    class_name: str = (
+        "rsl_rl.algorithms.representation_velocity_predictor_teacher_student_ppo:"
+        "RepresentationVelocityPredictorTeacherStudentPPO"
+    )
