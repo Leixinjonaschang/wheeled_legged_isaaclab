@@ -161,11 +161,6 @@ class _DelayedActionMixin:
         self._reset_delay_buffer(slice(None))
 
     @property
-    def delay_steps(self) -> torch.Tensor:
-        """Per-environment actuation delay, in physics steps."""
-        return self._delay_state.delay_steps
-
-    @property
     def applied_action(self) -> torch.Tensor:
         """Mean policy-space action actually executed during the current control step."""
         return self._applied_action_sum / self._applied_action_substeps.clamp_min(1)

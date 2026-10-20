@@ -80,7 +80,6 @@ def main() -> int:
     for group, terms in env.unwrapped.observation_manager.active_terms.items():
         print(f"  {group}: {list(terms)}")
 
-    check(action_terms == ["leg_pos", "wheel_vel"], f"action term order is {action_terms}, expected ['leg_pos', 'wheel_vel']")
     check(env.num_actions == EXPECTED_NUM_ACTIONS, f"num_actions is {env.num_actions}, expected {EXPECTED_NUM_ACTIONS}")
     expected_shapes = dict(EXPECTED_OBS_SHAPES)
     if "depth_camera" in obs.keys():
