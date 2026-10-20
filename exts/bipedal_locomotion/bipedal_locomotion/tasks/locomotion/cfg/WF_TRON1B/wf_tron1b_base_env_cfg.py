@@ -112,11 +112,17 @@ class WF_TRON1B_SceneCfg(InteractiveSceneCfg):
     # the wheel, so the rays must point straight down in world coordinates. Base-aligned
     # rays would tilt with the robot and report a longer distance the more it leans,
     # which the clearance reward would read as the wheel having been lifted.
+    #
+    # The rays start above the wheel and reach as far below its centre as mjlab's. mjlab casts from the
+    # centre and reads 0 for a ray that starts inside terrain; a mesh ray cast from inside a box would hit
+    # the box's bottom face instead, so the rays start clear of the terrain and sensor_utils clamps the
+    # clearance of anything above the centre to 0.
     wheel_height_scan_L = RayCasterCfg(
         prim_path="{ENV_REGEX_NS}/Robot/wheel_L_Link",
+        offset=RayCasterCfg.OffsetCfg(pos=(0.0, 0.0, C.WHEEL_HEIGHT_SCAN_START_HEIGHT)),
         ray_alignment="world",
         pattern_cfg=patterns.GridPatternCfg(resolution=C.WHEEL_HEIGHT_SCAN_RESOLUTION, size=C.WHEEL_HEIGHT_SCAN_SIZE),
-        max_distance=C.WHEEL_HEIGHT_MAX_DISTANCE,
+        max_distance=C.WHEEL_HEIGHT_SCAN_START_HEIGHT + C.WHEEL_HEIGHT_MAX_DISTANCE,
         mesh_prim_paths=["/World/ground"],
     )
     wheel_height_scan_R = wheel_height_scan_L.replace(prim_path="{ENV_REGEX_NS}/Robot/wheel_R_Link")
@@ -690,10 +696,9 @@ class WF_TRON1B_BaseEnvCfg(ManagerBasedRLEnvCfg):
         self.sim.render_interval = self.decimation
         self.sim.physics_material = self.scene.terrain.physics_material
         self.seed = 0
-
-        for scan in (self.scene.terrain_scan, self.scene.wheel_height_scan_L, self.scene.wheel_height_scan_R):
-            scan.update_period = self.decimation * self.sim.dt
-        self.scene.contact_forces.update_period = self.sim.dt
+        # Every sensor keeps update_period = 0: Isaac Lab's float32 per-episode sensor clock would make a
+        # non-zero period skip refreshes late in an episode (after 16 s at 0.02 s). Ray casters still cast
+        # once per step, when first read; the contact sensor updates every substep for its history.
 
         self.viewer.origin_type = "env"
 

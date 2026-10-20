@@ -3,11 +3,13 @@
 Height scans: mjlab's ``TerrainHeightSensor`` binds several frames (one per wheel) to one sensor and
 reports ``[B, F, N]`` clearance samples; Isaac Lab's :class:`RayCaster` binds one prim per
 environment, so each frame is a separate sensor and they are stacked back here. Clearance is
-``frame_z - hit_z`` (positive downward), with missed rays reported as the sensor's ``max_distance``.
+``frame_z - hit_z`` (positive downward), clamped to ``[0, reach]``: missed rays read the reach and
+terrain above the frame reads 0 (see :func:`clearance_samples`).
 
 Contacts: mjlab's contact sensors filter contacts by partner (terrain / robot subtree). Here one
 robot-wide :class:`ContactSensor` is filtered on the terrain mesh: its force matrix is the terrain
-contact and the remainder of the net force is robot-on-robot contact.
+contact and the remainder of the net force is robot-on-robot contact. Both are normal forces acting
+on the robot; the terrain friction is read from PhysX separately (:func:`terrain_friction_forces`).
 """
 
 from __future__ import annotations
@@ -16,7 +18,7 @@ from typing import TYPE_CHECKING
 
 import torch
 
-from .kernels import heights_from_raycast
+from .kernels import heights_from_raycast, segment_sums
 
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
@@ -29,14 +31,29 @@ __all__ = [
     "self_contact_forces",
     "stack_clearance_samples",
     "terrain_forces",
+    "terrain_friction_forces",
 ]
 
 
 def terrain_forces(env: ManagerBasedRLEnv, sensor_cfg: SceneEntityCfg, history: bool = False) -> torch.Tensor:
-    """World-frame terrain contact force per selected body, ``[B, N, 3]`` (``[B, H, N, 3]`` with history)."""
+    """World-frame normal terrain force on each selected body, ``[B, N, 3]`` (``[B, H, N, 3]`` with history)."""
     data = env.scene[sensor_cfg.name].data
     forces = data.force_matrix_w_history if history else data.force_matrix_w
     return forces.sum(dim=-2)[..., sensor_cfg.body_ids, :]
+
+
+def terrain_friction_forces(env: ManagerBasedRLEnv, sensor_cfg: SceneEntityCfg) -> torch.Tensor:
+    """World-frame terrain friction force on each selected body, ``[B, N, 3]``.
+
+    Isaac Lab's contact sensor reports normal forces only, so the friction is read from its PhysX contact
+    view, one row per contact point, and summed per body without a host sync (the PhysX read itself blocks,
+    like the sensor's own force reads). The view holds ``max_contact_data_count_per_prim`` rows per body;
+    the rough terrain fills about a sixth of the default.
+    """
+    sensor = env.scene[sensor_cfg.name]
+    friction, _, counts, starts = sensor.contact_physx_view.get_friction_data(dt=env.physics_dt)
+    per_pair = segment_sums(friction, starts.view(-1), counts.view(-1))  # [B * bodies * filters, 3]
+    return per_pair.view(env.num_envs, sensor.num_bodies, -1, 3).sum(dim=-2)[:, sensor_cfg.body_ids]
 
 
 def self_contact_forces(env: ManagerBasedRLEnv, sensor_cfg: SceneEntityCfg) -> torch.Tensor:
@@ -85,14 +102,19 @@ def hit_points_with_mask(
 
 
 def clearance_samples(env: ManagerBasedRLEnv, sensor_name: str) -> torch.Tensor:
-    """Clearance below one ray-caster, ``[B, 1, N]``. Missed (non-finite) hits read the sensor's ``max_distance``."""
+    """Clearance below one ray-caster's frame, ``[B, 1, N]``, clamped to ``[0, reach]``.
+
+    ``reach`` is how far the rays get below the frame: the sensor's ``max_distance`` less the height the
+    rays start above the frame. A missed (non-finite) hit reads the reach, and terrain above the frame
+    reads 0, which is what mjlab's ``TerrainHeightSensor`` reads for a ray that starts inside terrain.
+    """
     sensor = env.scene[sensor_name]
+    reach = sensor.cfg.max_distance - sensor.cfg.offset.pos[2]
     frame_z = sensor.data.pos_w[:, 2].view(-1, 1, 1)
     hit_z = sensor.data.ray_hits_w[..., 2].unsqueeze(1)
     miss = ~torch.isfinite(hit_z)
-    return heights_from_raycast(
-        frame_z, torch.nan_to_num(hit_z, nan=0.0, posinf=0.0, neginf=0.0), miss, sensor.cfg.max_distance
-    )
+    heights = heights_from_raycast(frame_z, torch.nan_to_num(hit_z, nan=0.0, posinf=0.0, neginf=0.0), miss, reach)
+    return heights.clamp(0.0, reach)
 
 
 def stack_clearance_samples(env: ManagerBasedRLEnv, sensor_names: tuple[str, ...]) -> torch.Tensor:

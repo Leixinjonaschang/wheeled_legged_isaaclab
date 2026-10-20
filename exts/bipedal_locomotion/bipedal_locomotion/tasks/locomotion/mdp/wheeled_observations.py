@@ -11,7 +11,7 @@ from isaaclab.managers import ManagerTermBase, ObservationTermCfg, SceneEntityCf
 
 from .depth import DelayedFrameBuffer, normalize_depth
 from .kernels import encode_contact_forces, smoothstep_gate, terrain_roughness_from_height_samples
-from .sensor_utils import contact_state, stack_clearance_samples, terrain_forces
+from .sensor_utils import contact_state, stack_clearance_samples, terrain_forces, terrain_friction_forces
 
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
@@ -54,10 +54,14 @@ def wheel_contact_forces(
     sensor_cfg: SceneEntityCfg,
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
 ) -> torch.Tensor:
-    """Log-compressed wheel-terrain contact forces in the base frame, ``[B, num_wheels * 3]``."""
-    forces_w = terrain_forces(env, sensor_cfg)  # [B, N, 3]
+    """Log-compressed force each wheel exerts on the terrain, in the base frame, ``[B, num_wheels * 3]``.
+
+    mjlab's ``netforce`` reading: normal plus friction, from the wheel onto the terrain, i.e. the opposite
+    of the force PhysX reports on the wheel.
+    """
+    on_wheels_w = terrain_forces(env, sensor_cfg) + terrain_friction_forces(env, sensor_cfg)  # [B, N, 3]
     root_quat_w = env.scene[asset_cfg.name].data.root_link_quat_w[:, None, :]
-    return encode_contact_forces(quat_apply_inverse(root_quat_w, forces_w))
+    return encode_contact_forces(quat_apply_inverse(root_quat_w, -on_wheels_w))
 
 
 def terrain_height_scan(env: ManagerBasedRLEnv, sensor_cfg: SceneEntityCfg, offset: float = 0.0) -> torch.Tensor:
@@ -77,7 +81,8 @@ def wheel_height(env: ManagerBasedRLEnv, sensor_names: tuple[str, ...]) -> torch
     """Smallest clearance under each wheel. Shape ``[B, num_wheels]``.
 
     The minimum over the local grid rather than the centre sample, so a wheel resting on
-    the lip of a step reports the height of the lip, not of the gap beside it.
+    the lip of a step reports the height of the lip, not of the gap beside it. Beside a step
+    taller than the wheel centre it reads 0, as in mjlab.
     """
     samples = stack_clearance_samples(env, sensor_names)  # [B, F, N]
     return samples.amin(dim=-1)

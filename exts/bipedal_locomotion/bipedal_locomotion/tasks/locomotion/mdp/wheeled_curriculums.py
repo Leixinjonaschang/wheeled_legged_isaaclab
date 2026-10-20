@@ -58,11 +58,11 @@ def fell_over_limit_angle(
     initial_limit_angle: float,
     final_limit_angle: float,
     ramp_steps: int,
-) -> torch.Tensor:
+) -> dict[str, torch.Tensor]:
     """Linearly relax the shared fall-over angle limit over global policy steps."""
     del env_ids  # the threshold is shared by all environments
     progress = min(max(float(env.common_step_counter) / max(ramp_steps, 1), 0.0), 1.0)
     limit_angle = initial_limit_angle + progress * (final_limit_angle - initial_limit_angle)
     term_cfg = env.termination_manager.get_term_cfg(termination_term_name)
     term_cfg.params["limit_angle"] = limit_angle
-    return torch.tensor(limit_angle, device=env.device)
+    return {"limit_angle": torch.tensor(limit_angle, device=env.device)}  # logged as .../limit_angle, as in mjlab

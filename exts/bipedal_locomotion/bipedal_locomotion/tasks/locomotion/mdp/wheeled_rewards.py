@@ -319,7 +319,10 @@ def soft_landing(
     """Penalise the terrain impact force at touchdown."""
     sensor = env.scene[sensor_cfg.name]
     force = torch.norm(torch.nan_to_num(terrain_forces(env, sensor_cfg), nan=0.0, posinf=0.0, neginf=0.0), dim=-1)
-    first_contact = sensor.compute_first_contact(env.step_dt)[:, sensor_cfg.body_ids].float()
+    # Half a physics step of tolerance: the sensor's float32 clock can sum a touchdown in the step's first
+    # substep to just over step_dt, which the default 1e-8 would miss.
+    first_contact = sensor.compute_first_contact(env.step_dt, abs_tol=0.5 * env.physics_dt)
+    first_contact = first_contact[:, sensor_cfg.body_ids].float()
     landing_impact = force * first_contact
     log_metric(env, "Metrics/landing_force_mean", landing_impact.sum() / first_contact.sum().clamp(min=1))
     cost = landing_impact.sum(dim=1)
@@ -409,7 +412,10 @@ def rough_wheel_foot_clearance(
     target_std: float = 0.04,
     command_threshold: float = 0.05,
 ) -> torch.Tensor:
-    """Reward swing-wheel clearance toward a target set by the local terrain height range."""
+    """Reward swing-wheel clearance toward a target set by the local terrain height range.
+
+    A wheel still below adjacent terrain has clearance 0, so the reward pays only once it clears the obstacle.
+    """
     gate, threshold = _roughness_gate(
         env,
         roughness_sensor_names,
