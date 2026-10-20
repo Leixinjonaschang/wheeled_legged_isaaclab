@@ -77,7 +77,8 @@ def wheel_height(env: ManagerBasedRLEnv, sensor_names: tuple[str, ...]) -> torch
     """Smallest clearance under each wheel. Shape ``[B, num_wheels]``.
 
     The minimum over the local grid rather than the centre sample, so a wheel resting on
-    the lip of a step reports the height of the lip, not of the gap beside it.
+    the lip of a step reports the height of the lip, not of the gap beside it. Beside a step
+    taller than the wheel centre it reads 0, as in mjlab.
     """
     samples = stack_clearance_samples(env, sensor_names)  # [B, F, N]
     return samples.amin(dim=-1)

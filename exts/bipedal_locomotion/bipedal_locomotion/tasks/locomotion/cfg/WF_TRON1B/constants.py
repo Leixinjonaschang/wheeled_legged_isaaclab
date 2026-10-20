@@ -71,7 +71,8 @@ TERRAIN_SCAN_GRID_SHAPE = (11, 11)
 WHEEL_HEIGHT_SCAN_SIZE = (0.40, 0.40)
 WHEEL_HEIGHT_SCAN_RESOLUTION = 0.10
 WHEEL_HEIGHT_GRID_SHAPE = (5, 5)
-WHEEL_HEIGHT_MAX_DISTANCE = 1.0
+WHEEL_HEIGHT_MAX_DISTANCE = 1.0  # clearance read below the wheel centre (mjlab's max_distance)
+WHEEL_HEIGHT_SCAN_START_HEIGHT = 1.0  # the wheel scans cast from this far above the wheel centre
 TERRAIN_SCAN_MAX_DISTANCE = 10.0
 
 # Terrain force above which a body counts as touching the ground. Set on the contact sensor,

@@ -409,7 +409,10 @@ def rough_wheel_foot_clearance(
     target_std: float = 0.04,
     command_threshold: float = 0.05,
 ) -> torch.Tensor:
-    """Reward swing-wheel clearance toward a target set by the local terrain height range."""
+    """Reward swing-wheel clearance toward a target set by the local terrain height range.
+
+    A wheel still below adjacent terrain has clearance 0, so the reward pays only once it clears the obstacle.
+    """
     gate, threshold = _roughness_gate(
         env,
         roughness_sensor_names,

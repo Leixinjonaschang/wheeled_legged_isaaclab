@@ -3,7 +3,8 @@
 Height scans: mjlab's ``TerrainHeightSensor`` binds several frames (one per wheel) to one sensor and
 reports ``[B, F, N]`` clearance samples; Isaac Lab's :class:`RayCaster` binds one prim per
 environment, so each frame is a separate sensor and they are stacked back here. Clearance is
-``frame_z - hit_z`` (positive downward), with missed rays reported as the sensor's ``max_distance``.
+``frame_z - hit_z`` (positive downward), clamped to ``[0, reach]``: missed rays read the reach and
+terrain above the frame reads 0 (see :func:`clearance_samples`).
 
 Contacts: mjlab's contact sensors filter contacts by partner (terrain / robot subtree). Here one
 robot-wide :class:`ContactSensor` is filtered on the terrain mesh: its force matrix is the terrain
@@ -85,14 +86,19 @@ def hit_points_with_mask(
 
 
 def clearance_samples(env: ManagerBasedRLEnv, sensor_name: str) -> torch.Tensor:
-    """Clearance below one ray-caster, ``[B, 1, N]``. Missed (non-finite) hits read the sensor's ``max_distance``."""
+    """Clearance below one ray-caster's frame, ``[B, 1, N]``, clamped to ``[0, reach]``.
+
+    ``reach`` is how far the rays get below the frame: the sensor's ``max_distance`` less the height the
+    rays start above the frame. A missed (non-finite) hit reads the reach, and terrain above the frame
+    reads 0, which is what mjlab's ``TerrainHeightSensor`` reads for a ray that starts inside terrain.
+    """
     sensor = env.scene[sensor_name]
+    reach = sensor.cfg.max_distance - sensor.cfg.offset.pos[2]
     frame_z = sensor.data.pos_w[:, 2].view(-1, 1, 1)
     hit_z = sensor.data.ray_hits_w[..., 2].unsqueeze(1)
     miss = ~torch.isfinite(hit_z)
-    return heights_from_raycast(
-        frame_z, torch.nan_to_num(hit_z, nan=0.0, posinf=0.0, neginf=0.0), miss, sensor.cfg.max_distance
-    )
+    heights = heights_from_raycast(frame_z, torch.nan_to_num(hit_z, nan=0.0, posinf=0.0, neginf=0.0), miss, reach)
+    return heights.clamp(0.0, reach)
 
 
 def stack_clearance_samples(env: ManagerBasedRLEnv, sensor_names: tuple[str, ...]) -> torch.Tensor:
