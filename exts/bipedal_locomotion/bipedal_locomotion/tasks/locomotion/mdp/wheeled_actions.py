@@ -161,11 +161,6 @@ class _DelayedActionMixin:
         self._reset_delay_buffer(slice(None))
 
     @property
-    def delay_steps(self) -> torch.Tensor:
-        """Per-environment actuation delay, in physics steps."""
-        return self._delay_state.delay_steps
-
-    @property
     def applied_action(self) -> torch.Tensor:
         """Mean policy-space action actually executed during the current control step."""
         return self._applied_action_sum / self._applied_action_substeps.clamp_min(1)
@@ -261,8 +256,7 @@ class DelayedJointPositionActionCfg(JointPositionActionCfg):
     delay_range_s: tuple[float, float] = (0.0, 0.02)
     """Inclusive range of representable physics-step delays, in seconds."""
     resampling_time_s: float = 5.0
-    """Simulated time between per-environment delay resamples. Independent of episode
-    boundaries, so a long episode still sees several different latencies."""
+    """Simulated time between per-environment delay resamples; the delay is also resampled on reset."""
     delay_group: str = "actions"
     """Terms sharing a group share one delay draw per environment."""
 
@@ -276,6 +270,6 @@ class DelayedJointVelocityActionCfg(JointVelocityActionCfg):
     delay_range_s: tuple[float, float] = (0.0, 0.02)
     """Inclusive range of representable physics-step delays, in seconds."""
     resampling_time_s: float = 5.0
-    """Simulated time between per-environment delay resamples."""
+    """Simulated time between per-environment delay resamples; the delay is also resampled on reset."""
     delay_group: str = "actions"
     """Terms sharing a group share one delay draw per environment."""

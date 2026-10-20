@@ -58,9 +58,8 @@ WHEELFOOT_TRON1B_CFG = ArticulationCfg(
         joint_pos={".*": 0.0},
         joint_vel={".*": 0.0},
     ),
-    # MJCF applies no soft-limit shrink. TRON2A uses 0.9, but copying that here would
-    # make `leg_joint_pos_limits` (weight -5.0) start penalising 10% inside the true
-    # limit and quietly change the task.
+    # The MJCF applies no soft-limit shrink; a factor below 1 would make `leg_joint_pos_limits`
+    # penalise inside the true limit.
     soft_joint_pos_limit_factor=1.0,
     actuators={
         # MJCF: <position kp="40.0" kv="1.8" forcerange="-80 80">, joint damping 0.01.

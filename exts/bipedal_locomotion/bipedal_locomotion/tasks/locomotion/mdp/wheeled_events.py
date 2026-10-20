@@ -48,8 +48,8 @@ _SHAPE_COUNTS_ATTR = "_wf_tron1b_num_shapes_per_body"
 def _num_shapes_per_body(asset) -> list[int]:
     """Collision-shape count of each body, cached on the asset.
 
-    PhysX indexes materials by shape, not body, and a body may own several shapes (each knee
-    carries its own collider and the wheel-motor one), so body ids cannot index materials.
+    PhysX indexes materials by shape, not body, and a body may own several shapes, so body ids
+    cannot index materials.
     """
     counts = getattr(asset, _SHAPE_COUNTS_ATTR, None)
     if counts is None:

@@ -6,8 +6,8 @@ machine with no Isaac Sim installed -- which is what makes it possible to check
 this port's arithmetic against the mjlab original before ever launching a
 simulator.
 
-The manager-facing terms in ``observations.py`` / ``rewards.py`` are thin
-adapters: they pull tensors out of ``env.scene[...]`` and call in here.
+The manager-facing terms in the ``wheeled_*.py`` modules are thin adapters: they
+pull tensors out of ``env.scene[...]`` and call in here.
 """
 
 from __future__ import annotations
@@ -16,6 +16,8 @@ import math
 from typing import NamedTuple
 
 import torch
+
+from bipedal_locomotion.utils.math import quat_apply_inverse
 
 __all__ = [
     "CommandTrackingMonitor",
@@ -323,11 +325,7 @@ def body_positions_in_base_frame(
     Returns:
         Body positions in the base frame, shape ``[B, N, 3]``.
     """
-    from bipedal_locomotion.utils.math import quat_apply_inverse
-
-    offset = body_pos_w - base_pos_w[:, None, :]
-    quat = base_quat_w[:, None, :].expand(-1, body_pos_w.shape[1], -1)
-    return quat_apply_inverse(quat, offset)
+    return quat_apply_inverse(base_quat_w[:, None, :], body_pos_w - base_pos_w[:, None, :])
 
 
 def wheel_lateral_symmetry(wheel_pos_b: torch.Tensor, std: float) -> torch.Tensor:

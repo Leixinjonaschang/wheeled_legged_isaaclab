@@ -152,9 +152,3 @@ class WheeledUniformVelocityCommand(CommandTerm):
         self.vel_command_h[standing_ids, :] = 0.0
         self.vel_command_b[standing_ids, :] = 0.0
         self.vel_command_w[standing_ids, :] = 0.0
-
-    def _set_debug_vis_impl(self, debug_vis: bool) -> None:
-        pass  # Debug visualization is not ported (decision D12).
-
-    def _debug_vis_callback(self, event) -> None:
-        pass

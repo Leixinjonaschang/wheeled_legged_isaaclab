@@ -3,7 +3,7 @@
 Height scans: mjlab's ``TerrainHeightSensor`` binds several frames (one per wheel) to one sensor and
 reports ``[B, F, N]`` clearance samples; Isaac Lab's :class:`RayCaster` binds one prim per
 environment, so each frame is a separate sensor and they are stacked back here. Clearance is
-``frame_z - hit_z`` (positive downward), with missed rays reported as ``max_distance``.
+``frame_z - hit_z`` (positive downward), with missed rays reported as the sensor's ``max_distance``.
 
 Contacts: mjlab's contact sensors filter contacts by partner (terrain / robot subtree). Here one
 robot-wide :class:`ContactSensor` is filtered on the terrain mesh: its force matrix is the terrain
@@ -84,19 +84,17 @@ def hit_points_with_mask(
     return torch.cat(all_points, dim=1), torch.cat(all_valid, dim=1)
 
 
-def clearance_samples(env: ManagerBasedRLEnv, sensor_name: str, max_distance: float) -> torch.Tensor:
-    """Clearance below one ray-caster, ``[B, 1, N]``. Missed rays (non-finite hits) read ``max_distance``."""
-    data = env.scene[sensor_name].data
-    frame_z = data.pos_w[:, 2].view(-1, 1, 1)
-    hit_z = data.ray_hits_w[..., 2].unsqueeze(1)
+def clearance_samples(env: ManagerBasedRLEnv, sensor_name: str) -> torch.Tensor:
+    """Clearance below one ray-caster, ``[B, 1, N]``. Missed (non-finite) hits read the sensor's ``max_distance``."""
+    sensor = env.scene[sensor_name]
+    frame_z = sensor.data.pos_w[:, 2].view(-1, 1, 1)
+    hit_z = sensor.data.ray_hits_w[..., 2].unsqueeze(1)
     miss = ~torch.isfinite(hit_z)
-    return heights_from_raycast(frame_z, torch.nan_to_num(hit_z, nan=0.0, posinf=0.0, neginf=0.0), miss, max_distance)
+    return heights_from_raycast(
+        frame_z, torch.nan_to_num(hit_z, nan=0.0, posinf=0.0, neginf=0.0), miss, sensor.cfg.max_distance
+    )
 
 
-def stack_clearance_samples(
-    env: ManagerBasedRLEnv,
-    sensor_names: tuple[str, ...],
-    max_distance: float,
-) -> torch.Tensor:
+def stack_clearance_samples(env: ManagerBasedRLEnv, sensor_names: tuple[str, ...]) -> torch.Tensor:
     """Clearance below several ray-casters, ``[B, F, N]``; ``sensor_names`` fixes the frame order."""
-    return torch.cat([clearance_samples(env, name, max_distance) for name in sensor_names], dim=1)
+    return torch.cat([clearance_samples(env, name) for name in sensor_names], dim=1)

@@ -1,9 +1,4 @@
-"""Observation terms specific to the wheeled-legged WF-TRON1B task.
-
-Kept separate from ``observations.py`` (which serves the sole-foot / wheel-foot TRON2A
-configs) because these terms assume a two-wheel robot with a mixed position/velocity
-actuation split.
-"""
+"""Observation terms for the WF-TRON1B task."""
 
 from __future__ import annotations
 
@@ -61,39 +56,30 @@ def wheel_contact_forces(
 ) -> torch.Tensor:
     """Log-compressed wheel-terrain contact forces in the base frame, ``[B, num_wheels * 3]``."""
     forces_w = terrain_forces(env, sensor_cfg)  # [B, N, 3]
-    root_quat_w = env.scene[asset_cfg.name].data.root_link_quat_w[:, None, :].expand(-1, forces_w.shape[1], -1)
+    root_quat_w = env.scene[asset_cfg.name].data.root_link_quat_w[:, None, :]
     return encode_contact_forces(quat_apply_inverse(root_quat_w, forces_w))
 
 
-def terrain_height_scan(
-    env: ManagerBasedRLEnv,
-    sensor_cfg: SceneEntityCfg,
-    offset: float = 0.0,
-    max_distance: float = 10.0,
-) -> torch.Tensor:
+def terrain_height_scan(env: ManagerBasedRLEnv, sensor_cfg: SceneEntityCfg, offset: float = 0.0) -> torch.Tensor:
     """Height of the base above the terrain samples under it. Shape ``[B, num_rays]``.
 
-    Equivalent to Isaac Lab's ``mdp.height_scan`` except that rays which hit nothing
-    report ``max_distance`` instead of infinity. An infinite entry would propagate
+    Equivalent to Isaac Lab's ``mdp.height_scan`` except that rays which hit nothing report
+    the sensor's ``max_distance`` instead of infinity. An infinite entry would propagate
     through observation normalisation and poison every other term in the group.
     """
     sensor = env.scene[sensor_cfg.name]
     hit_z = sensor.data.ray_hits_w[..., 2]
     heights = sensor.data.pos_w[:, 2].unsqueeze(1) - hit_z - offset
-    return torch.where(torch.isfinite(heights), heights, torch.full_like(heights, max_distance))
+    return torch.where(torch.isfinite(heights), heights, torch.full_like(heights, sensor.cfg.max_distance))
 
 
-def wheel_height(
-    env: ManagerBasedRLEnv,
-    sensor_names: tuple[str, ...],
-    max_distance: float = 1.0,
-) -> torch.Tensor:
+def wheel_height(env: ManagerBasedRLEnv, sensor_names: tuple[str, ...]) -> torch.Tensor:
     """Smallest clearance under each wheel. Shape ``[B, num_wheels]``.
 
     The minimum over the local grid rather than the centre sample, so a wheel resting on
     the lip of a step reports the height of the lip, not of the gap beside it.
     """
-    samples = stack_clearance_samples(env, sensor_names, max_distance)  # [B, F, N]
+    samples = stack_clearance_samples(env, sensor_names)  # [B, F, N]
     return samples.amin(dim=-1)
 
 
@@ -104,11 +90,10 @@ def terrain_roughness_indicator(
     gate_min: float = 0.10,
     gate_max: float = 0.40,
     grid_shape: tuple[int, int] | None = None,
-    max_distance: float = 10.0,
 ) -> torch.Tensor:
     """Roughness gate of the scanned terrain, in [0, 1], ``[B, 1]``: the quantity gating the rough-terrain rewards."""
     stats = terrain_roughness_from_height_samples(
-        stack_clearance_samples(env, sensor_names, max_distance),
+        stack_clearance_samples(env, sensor_names),
         wheel_radius=wheel_radius,
         gate_min=gate_min,
         gate_max=gate_max,
@@ -124,11 +109,10 @@ def wheel_roughness_gate(
     gate_min: float = 0.10,
     gate_max: float = 0.40,
     grid_shape: tuple[int, int] | None = None,
-    max_distance: float = 1.0,
 ) -> torch.Tensor:
     """Per-wheel roughness gates of the wheel height scans, ``[B, num_wheels]`` ordered like ``sensor_names``."""
     stats = terrain_roughness_from_height_samples(
-        stack_clearance_samples(env, sensor_names, max_distance),
+        stack_clearance_samples(env, sensor_names),
         wheel_radius=wheel_radius,
         gate_min=gate_min,
         gate_max=gate_max,

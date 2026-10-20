@@ -5,10 +5,10 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-from _loader import PKG_DIR, _load, _stub_package
+from _loader import PKG_DIR, load, stub_package
 
-_stub_package("bipedal_locomotion.terrains", PKG_DIR / "terrains")
-st = _load("bipedal_locomotion.terrains.sub_terrains", "terrains/sub_terrains.py")
+stub_package("bipedal_locomotion.terrains", PKG_DIR / "terrains")
+st = load("bipedal_locomotion.terrains.sub_terrains", "terrains/sub_terrains.py")
 
 SIZE = (8.0, 8.0)
 

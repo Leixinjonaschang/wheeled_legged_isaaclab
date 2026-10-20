@@ -101,9 +101,8 @@ def main() -> None:
     runner.load(resume_path)
 
     if args_cli.export_onnx:
-        export_dir = os.path.join(os.path.dirname(resume_path), "exported")
-        runner.export_policy_to_onnx(export_dir, "policy.onnx")
-        print(f"[INFO] Exported ONNX policy to: {export_dir}")
+        onnx_path = runner.export_onnx_with_metadata(os.path.join(os.path.dirname(resume_path), "exported"))
+        print(f"[INFO] Exported ONNX policy with deployment metadata to: {onnx_path}")
         env.close()
         return
 
