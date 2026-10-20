@@ -1,11 +1,8 @@
 """MDP terms available to the locomotion task configs.
 
 Layered so that a local definition shadows an upstream one of the same name: the
-upstream velocity-locomotion terms come first, then this package's additions.
-
-The ``wheeled_*`` modules hold the WF-TRON1B terms. They are kept separate because they
-assume a two-wheel robot with a mixed position/velocity actuation split, and because
-several of them intentionally differ from a similarly named upstream term -- notably
+upstream velocity-locomotion terms come first, then this package's WF-TRON1B terms.
+Several intentionally differ from a similarly named upstream term -- notably
 ``base_link_lin_vel`` (link frame, not centre of mass) and ``track_linear_velocity``
 (world frame, not body frame).
 """

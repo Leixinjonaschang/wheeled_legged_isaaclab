@@ -261,8 +261,7 @@ class DelayedJointPositionActionCfg(JointPositionActionCfg):
     delay_range_s: tuple[float, float] = (0.0, 0.02)
     """Inclusive range of representable physics-step delays, in seconds."""
     resampling_time_s: float = 5.0
-    """Simulated time between per-environment delay resamples. Independent of episode
-    boundaries, so a long episode still sees several different latencies."""
+    """Simulated time between per-environment delay resamples; the delay is also resampled on reset."""
     delay_group: str = "actions"
     """Terms sharing a group share one delay draw per environment."""
 
@@ -276,6 +275,6 @@ class DelayedJointVelocityActionCfg(JointVelocityActionCfg):
     delay_range_s: tuple[float, float] = (0.0, 0.02)
     """Inclusive range of representable physics-step delays, in seconds."""
     resampling_time_s: float = 5.0
-    """Simulated time between per-environment delay resamples."""
+    """Simulated time between per-environment delay resamples; the delay is also resampled on reset."""
     delay_group: str = "actions"
     """Terms sharing a group share one delay draw per environment."""

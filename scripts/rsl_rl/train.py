@@ -97,9 +97,7 @@ def main() -> None:
         print_dict(video_kwargs, nesting=4)
         env = gym.wrappers.RecordVideo(env, **video_kwargs)
 
-    # The wheeled wrapper adds extras["applied_actions"]. Plain PPO ignores it; the
-    # latent-dynamics variants require it, so using it unconditionally keeps the two
-    # families on one code path.
+    # extras["applied_actions"] feeds the latent-dynamics predictor (Depth-Predict-OursGP); BlindGP ignores it.
     env = WheeledLeggedRslRlVecEnvWrapper(env, clip_actions=agent_cfg.clip_actions)
 
     runner = WheeledLeggedVelocityOnPolicyRunner(

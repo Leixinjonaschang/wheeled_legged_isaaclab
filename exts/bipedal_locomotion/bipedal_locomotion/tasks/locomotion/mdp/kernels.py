@@ -6,8 +6,8 @@ machine with no Isaac Sim installed -- which is what makes it possible to check
 this port's arithmetic against the mjlab original before ever launching a
 simulator.
 
-The manager-facing terms in ``observations.py`` / ``rewards.py`` are thin
-adapters: they pull tensors out of ``env.scene[...]`` and call in here.
+The manager-facing terms in the ``wheeled_*.py`` modules are thin adapters: they
+pull tensors out of ``env.scene[...]`` and call in here.
 """
 
 from __future__ import annotations

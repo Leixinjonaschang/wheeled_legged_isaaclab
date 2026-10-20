@@ -185,11 +185,8 @@ class CommandsCfg:
 
 @configclass
 class ActionsCfg:
-    """Exactly two terms, in this order: the 8-vector is ``[leg_pos x6, wheel_vel x2]``.
-
-    Splitting into four L/R terms (as the TRON2A configs do) would produce a different
-    layout and silently invalidate the exported deployment metadata.
-    """
+    """Exactly two terms, in this order: the 8-vector ``[leg_pos x6, wheel_vel x2]`` is the layout
+    the exported deployment metadata records."""
 
     leg_pos = mdp.DelayedJointPositionActionCfg(
         asset_name=C.ROBOT_ENTITY,

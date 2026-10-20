@@ -1,9 +1,4 @@
-"""Observation terms specific to the wheeled-legged WF-TRON1B task.
-
-Kept separate from ``observations.py`` (which serves the sole-foot / wheel-foot TRON2A
-configs) because these terms assume a two-wheel robot with a mixed position/velocity
-actuation split.
-"""
+"""Observation terms for the WF-TRON1B task."""
 
 from __future__ import annotations
 
