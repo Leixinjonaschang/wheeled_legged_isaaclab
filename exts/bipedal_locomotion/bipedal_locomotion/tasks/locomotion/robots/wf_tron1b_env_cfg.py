@@ -13,28 +13,8 @@ from bipedal_locomotion.tasks.locomotion.cfg.WF_TRON1B.wf_tron1b_base_env_cfg im
     WF_TRON1B_DepthSceneCfg,
 )
 from bipedal_locomotion.tasks.locomotion.mdp import wheeled_events
-from isaaclab.envs.mdp.actions.actions_cfg import JointPositionActionCfg, JointVelocityActionCfg
 from isaaclab.managers import EventTermCfg as EventTerm
 from isaaclab.utils import configclass
-
-
-def _disable_action_delay(cfg: WF_TRON1B_BaseEnvCfg) -> None:
-    """Swap the delayed action terms for plain ones (mjlab ``make_actions(action_delay=False)``)."""
-    leg, wheel = cfg.actions.leg_pos, cfg.actions.wheel_vel
-    cfg.actions.leg_pos = JointPositionActionCfg(
-        asset_name=leg.asset_name,
-        joint_names=leg.joint_names,
-        preserve_order=leg.preserve_order,
-        scale=leg.scale,
-        use_default_offset=leg.use_default_offset,
-    )
-    cfg.actions.wheel_vel = JointVelocityActionCfg(
-        asset_name=wheel.asset_name,
-        joint_names=wheel.joint_names,
-        preserve_order=wheel.preserve_order,
-        scale=wheel.scale,
-        use_default_offset=wheel.use_default_offset,
-    )
 
 
 def _apply_play_overrides(cfg: WF_TRON1B_BaseEnvCfg) -> None:
@@ -42,7 +22,8 @@ def _apply_play_overrides(cfg: WF_TRON1B_BaseEnvCfg) -> None:
     cfg.scene.num_envs = 32
     cfg.episode_length_s = 1.0e9
     cfg.observations.proprio_history.enable_corruption = False
-    _disable_action_delay(cfg)
+    # mjlab plays without action delay; the delayed terms stay because they also apply the encoder bias.
+    cfg.actions.leg_pos.delay_range_s = cfg.actions.wheel_vel.delay_range_s = (0.0, 0.0)
     cfg.events.push_robot = None
 
     # Curricula are training schedules: disable them and pin what they drive at the final values.
