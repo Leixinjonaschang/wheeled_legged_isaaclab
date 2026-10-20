@@ -696,10 +696,9 @@ class WF_TRON1B_BaseEnvCfg(ManagerBasedRLEnvCfg):
         self.sim.render_interval = self.decimation
         self.sim.physics_material = self.scene.terrain.physics_material
         self.seed = 0
-
-        for scan in (self.scene.terrain_scan, self.scene.wheel_height_scan_L, self.scene.wheel_height_scan_R):
-            scan.update_period = self.decimation * self.sim.dt
-        self.scene.contact_forces.update_period = self.sim.dt
+        # Every sensor keeps update_period = 0: Isaac Lab's float32 per-episode sensor clock would make a
+        # non-zero period skip refreshes late in an episode (after 16 s at 0.02 s). Ray casters still cast
+        # once per step, when first read; the contact sensor updates every substep for its history.
 
         self.viewer.origin_type = "env"
 
