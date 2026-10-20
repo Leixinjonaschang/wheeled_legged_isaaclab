@@ -87,7 +87,6 @@ def log_metric(env: ManagerBasedRLEnv, key: str, value) -> None:
 def _roughness_gate(
     env: ManagerBasedRLEnv,
     roughness_sensor_names: tuple[str, ...],
-    roughness_max_distance: float,
     wheel_radius: float,
     gate_min: float,
     gate_max: float,
@@ -97,7 +96,7 @@ def _roughness_gate(
     roughness_gate_threshold_ramp_steps: int,
 ) -> tuple[torch.Tensor, float]:
     """Roughness gate of the scanned terrain and the currently scheduled activation threshold."""
-    samples = stack_clearance_samples(env, roughness_sensor_names, roughness_max_distance)
+    samples = stack_clearance_samples(env, roughness_sensor_names)
     stats = terrain_roughness_from_height_samples(
         samples, wheel_radius=wheel_radius, gate_min=gate_min, gate_max=gate_max, grid_shape=grid_shape
     )
@@ -366,7 +365,6 @@ def rough_wheel_usage(
     env: ManagerBasedRLEnv,
     asset_cfg: SceneEntityCfg,
     roughness_sensor_names: tuple[str, ...],
-    roughness_max_distance: float = 10.0,
     wheel_radius: float = 0.127,
     gate_min: float = 0.10,
     gate_max: float = 0.40,
@@ -379,7 +377,6 @@ def rough_wheel_usage(
     gate, threshold = _roughness_gate(
         env,
         roughness_sensor_names,
-        roughness_max_distance,
         wheel_radius,
         gate_min,
         gate_max,
@@ -398,7 +395,6 @@ def rough_wheel_foot_clearance(
     contact_sensor_cfg: SceneEntityCfg,
     command_name: str,
     roughness_sensor_names: tuple[str, ...],
-    roughness_max_distance: float = 10.0,
     wheel_radius: float = 0.127,
     gate_min: float = 0.10,
     gate_max: float = 0.40,
@@ -407,7 +403,6 @@ def rough_wheel_foot_clearance(
     roughness_gate_threshold_ramp_steps: int = 0,
     grid_shape: tuple[int, int] | None = None,
     clearance_grid_shape: tuple[int, int] | None = None,
-    clearance_max_distance: float = 1.0,
     base_target_height: float = 0.06,
     range_scale: float = 0.5,
     max_target_height: float = 0.18,
@@ -418,7 +413,6 @@ def rough_wheel_foot_clearance(
     gate, threshold = _roughness_gate(
         env,
         roughness_sensor_names,
-        roughness_max_distance,
         wheel_radius,
         gate_min,
         gate_max,
@@ -427,7 +421,7 @@ def rough_wheel_foot_clearance(
         roughness_gate_threshold_final,
         roughness_gate_threshold_ramp_steps,
     )
-    samples = stack_clearance_samples(env, clearance_sensor_names, clearance_max_distance)  # [B, F, N]
+    samples = stack_clearance_samples(env, clearance_sensor_names)  # [B, F, N]
     if clearance_grid_shape is not None and clearance_grid_shape[0] * clearance_grid_shape[1] != samples.shape[-1]:
         raise ValueError(f"clearance_grid_shape={clearance_grid_shape} does not match {samples.shape[-1]} samples")
     local_height_range = samples.amax(dim=-1) - samples.amin(dim=-1)
@@ -451,7 +445,6 @@ def rough_contact_pattern(
     contact_sensor_cfg: SceneEntityCfg,
     command_name: str,
     roughness_sensor_names: tuple[str, ...],
-    roughness_max_distance: float = 10.0,
     wheel_radius: float = 0.127,
     gate_min: float = 0.10,
     gate_max: float = 0.40,
@@ -465,7 +458,6 @@ def rough_contact_pattern(
     gate, threshold = _roughness_gate(
         env,
         roughness_sensor_names,
-        roughness_max_distance,
         wheel_radius,
         gate_min,
         gate_max,
@@ -490,7 +482,6 @@ def non_rough_wheel_lateral_symmetry(
     std: float,
     asset_cfg: SceneEntityCfg,
     roughness_sensor_names: tuple[str, ...],
-    roughness_max_distance: float = 10.0,
     wheel_radius: float = 0.127,
     gate_min: float = 0.10,
     gate_max: float = 0.40,
@@ -503,7 +494,6 @@ def non_rough_wheel_lateral_symmetry(
     gate, threshold = _roughness_gate(
         env,
         roughness_sensor_names,
-        roughness_max_distance,
         wheel_radius,
         gate_min,
         gate_max,
@@ -519,7 +509,6 @@ def non_rough_wheel_x_alignment(
     env: ManagerBasedRLEnv,
     asset_cfg: SceneEntityCfg,
     roughness_sensor_names: tuple[str, ...],
-    roughness_max_distance: float = 10.0,
     wheel_radius: float = 0.127,
     gate_min: float = 0.10,
     gate_max: float = 0.40,
@@ -532,7 +521,6 @@ def non_rough_wheel_x_alignment(
     gate, threshold = _roughness_gate(
         env,
         roughness_sensor_names,
-        roughness_max_distance,
         wheel_radius,
         gate_min,
         gate_max,
@@ -550,7 +538,6 @@ def non_rough_flat_orientation(
     asset_cfg: SceneEntityCfg = _ROBOT,
     roll_weight: float = 1.0,
     pitch_weight: float = 1.0,
-    roughness_max_distance: float = 10.0,
     wheel_radius: float = 0.127,
     gate_min: float = 0.10,
     gate_max: float = 0.40,
@@ -563,7 +550,6 @@ def non_rough_flat_orientation(
     gate, threshold = _roughness_gate(
         env,
         roughness_sensor_names,
-        roughness_max_distance,
         wheel_radius,
         gate_min,
         gate_max,
@@ -582,7 +568,6 @@ def standing_forward_wheel_air_time(
     contact_sensor_cfg: SceneEntityCfg,
     command_name: str,
     roughness_sensor_names: tuple[str, ...],
-    roughness_max_distance: float = 10.0,
     wheel_radius: float = 0.127,
     gate_min: float = 0.10,
     gate_max: float = 0.40,
@@ -597,7 +582,6 @@ def standing_forward_wheel_air_time(
     gate, threshold = _roughness_gate(
         env,
         roughness_sensor_names,
-        roughness_max_distance,
         wheel_radius,
         gate_min,
         gate_max,

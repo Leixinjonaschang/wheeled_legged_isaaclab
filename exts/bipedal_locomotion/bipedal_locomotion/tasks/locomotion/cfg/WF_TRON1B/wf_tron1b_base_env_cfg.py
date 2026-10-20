@@ -57,7 +57,6 @@ _TERRAIN_SCAN = SceneEntityCfg(C.TERRAIN_SCAN_SENSOR)
 # Shared by every terrain-gated reward: the gate is computed from the base scan, as in mjlab.
 _ROUGHNESS_KWARGS = {
     "roughness_sensor_names": (C.TERRAIN_SCAN_SENSOR,),
-    "roughness_max_distance": C.TERRAIN_SCAN_MAX_DISTANCE,
     "wheel_radius": C.WHEEL_RADIUS,
     "gate_min": C.ROUGHNESS_GATE_MIN,
     "gate_max": C.ROUGHNESS_GATE_MAX,
@@ -270,13 +269,10 @@ class ObservationsCfg:
         wheel_contact_forces = ObsTerm(func=mdp.wheel_contact_forces, params={"sensor_cfg": _WHEEL_CONTACTS})
         height_scan = ObsTerm(
             func=mdp.terrain_height_scan,
-            params={"sensor_cfg": _TERRAIN_SCAN, "max_distance": C.TERRAIN_SCAN_MAX_DISTANCE},
+            params={"sensor_cfg": _TERRAIN_SCAN},
             scale=C.SCALE_HEIGHT_SCAN,
         )
-        wheel_height = ObsTerm(
-            func=mdp.wheel_height,
-            params={"sensor_names": C.WHEEL_HEIGHT_SENSORS, "max_distance": C.WHEEL_HEIGHT_MAX_DISTANCE},
-        )
+        wheel_height = ObsTerm(func=mdp.wheel_height, params={"sensor_names": C.WHEEL_HEIGHT_SENSORS})
         roughness_indicator = ObsTerm(
             func=mdp.terrain_roughness_indicator,
             params={
@@ -285,7 +281,6 @@ class ObservationsCfg:
                 "gate_min": C.ROUGHNESS_GATE_MIN,
                 "gate_max": C.ROUGHNESS_GATE_MAX,
                 "grid_shape": C.TERRAIN_SCAN_GRID_SHAPE,
-                "max_distance": C.TERRAIN_SCAN_MAX_DISTANCE,
             },
         )
 
@@ -307,7 +302,6 @@ class ObservationsCfg:
                 "gate_min": C.ROUGHNESS_GATE_MIN,
                 "gate_max": C.ROUGHNESS_GATE_MAX,
                 "grid_shape": C.WHEEL_HEIGHT_GRID_SHAPE,
-                "max_distance": C.WHEEL_HEIGHT_MAX_DISTANCE,
             },
         )
 
@@ -529,7 +523,6 @@ class RewardsCfg:
             **_ROUGHNESS_KWARGS,
             "clearance_sensor_names": C.WHEEL_HEIGHT_SENSORS,
             "clearance_grid_shape": C.WHEEL_HEIGHT_GRID_SHAPE,
-            "clearance_max_distance": C.WHEEL_HEIGHT_MAX_DISTANCE,
             "contact_sensor_cfg": _WHEEL_CONTACTS,
             "command_name": C.COMMAND_NAME,
             "base_target_height": 0.03,
