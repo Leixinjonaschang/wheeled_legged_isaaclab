@@ -17,6 +17,8 @@ from typing import NamedTuple
 
 import torch
 
+from bipedal_locomotion.utils.math import quat_apply_inverse
+
 __all__ = [
     "CommandTrackingMonitor",
     "TerrainRoughnessStats",
@@ -323,11 +325,7 @@ def body_positions_in_base_frame(
     Returns:
         Body positions in the base frame, shape ``[B, N, 3]``.
     """
-    from bipedal_locomotion.utils.math import quat_apply_inverse
-
-    offset = body_pos_w - base_pos_w[:, None, :]
-    quat = base_quat_w[:, None, :].expand(-1, body_pos_w.shape[1], -1)
-    return quat_apply_inverse(quat, offset)
+    return quat_apply_inverse(base_quat_w[:, None, :], body_pos_w - base_pos_w[:, None, :])
 
 
 def wheel_lateral_symmetry(wheel_pos_b: torch.Tensor, std: float) -> torch.Tensor:

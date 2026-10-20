@@ -12,6 +12,8 @@ import onnx
 import torch
 from rsl_rl.models import DepthRepresentationVelocityActorCritic, RepresentationVelocityActorCritic
 
+from bipedal_locomotion.tasks.locomotion.cfg.WF_TRON1B.constants import MJCF_JOINT_NAMES
+
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
 
@@ -44,8 +46,6 @@ def _plain(value):
 def get_wheeled_legged_metadata(env: ManagerBasedRLEnv, run_path: str, policy=None) -> dict[str, Any]:
     """Deployment metadata for a WF-TRON1B policy: mixed leg-position / wheel-velocity actions and the
     proprioceptive observation terms the deployed student consumes."""
-    from bipedal_locomotion.tasks.locomotion.cfg.WF_TRON1B.constants import MJCF_JOINT_NAMES  # avoids an import cycle
-
     robot = env.scene["robot"]
     joint_ids = [robot.joint_names.index(name) for name in MJCF_JOINT_NAMES]
 

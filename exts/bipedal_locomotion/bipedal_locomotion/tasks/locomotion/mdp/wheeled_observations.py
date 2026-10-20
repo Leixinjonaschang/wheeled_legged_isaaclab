@@ -56,7 +56,7 @@ def wheel_contact_forces(
 ) -> torch.Tensor:
     """Log-compressed wheel-terrain contact forces in the base frame, ``[B, num_wheels * 3]``."""
     forces_w = terrain_forces(env, sensor_cfg)  # [B, N, 3]
-    root_quat_w = env.scene[asset_cfg.name].data.root_link_quat_w[:, None, :].expand(-1, forces_w.shape[1], -1)
+    root_quat_w = env.scene[asset_cfg.name].data.root_link_quat_w[:, None, :]
     return encode_contact_forces(quat_apply_inverse(root_quat_w, forces_w))
 
 
