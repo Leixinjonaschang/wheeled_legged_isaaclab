@@ -14,12 +14,14 @@
 > `192.168.2.65:8022/rl/poc/tron/tron2_open_source/tron2_rl_lab` is a
 > private mirror used for LimX-internal development only.
 
-Reinforcement learning training stack for the LimX **TRON2A** bipedal
-robot, built on top of
-[Isaac Lab](https://isaac-sim.github.io/IsaacLab/) and using PPO to
-train locomotion policies. This repository focuses on flat-terrain
-training for the base morphology and supports both the **SF**
-(sole-foot) and **WF** (wheel-foot) robot variants.
+Reinforcement learning training stack for the LimX **WF-TRON1B** wheeled
+biped (position-controlled legs, velocity-controlled wheels), built on
+[Isaac Lab](https://isaac-sim.github.io/IsaacLab/). It hosts the
+teacher-student velocity-tracking tasks ported from `wheeled_legged_mjlab`:
+a blind policy and a depth-camera policy with latent-dynamics prediction,
+both trained on generated rough terrain.
+[`doc/mjlab_migration.md`](doc/mjlab_migration.md) maps the port onto the
+mjlab original and records the decisions it involved.
 
 ## License & attribution
 
@@ -80,8 +82,9 @@ For a summary of local modifications relative to upstream, see
 - **No training logs, TensorBoard events, or Weights & Biases runs.**
   `logs/`, `wandb/`, `events.out.tfevents.*` are `.gitignore`'d and
   CI-blocked.
-- **No test suite yet.** CI covers `python -m py_compile`, `ruff`,
-  forbidden-artifact scans, and license scans only. Adding a smoke
+- **No simulator tests in CI.** CI covers `python -m py_compile`, `ruff`,
+  forbidden-artifact scans, and license scans only; the unit tests in
+  `tests/` run without Isaac Sim but are not wired into CI. Adding a smoke
   training-step check on a headless GPU worker is tracked as
   follow-up work.
 - **No Isaac Sim redistribution.** You must obtain NVIDIA Isaac Sim
@@ -104,17 +107,22 @@ below.
 
 ```
 .
-├── exts/bipedal_locomotion/   # Isaac Lab extension: env / asset / MDP / robot cfg
-├── rsl_rl/                    # vendored rsl_rl fork (PPO + on-policy runner)
+├── exts/bipedal_locomotion/   # Isaac Lab extension: env / asset / MDP / sensor / terrain / robot cfg
+├── rsl_rl/                    # vendored rsl_rl fork (teacher-student representation PPO)
 ├── scripts/rsl_rl/            # training / play entry points (train.py / play.py / cli_args.py)
+├── scripts/tools/             # MJCF -> USD converter, smoke rollout
+├── tests/                     # unit and mjlab-parity tests (no Isaac Sim needed)
+├── doc/                       # migration notes, media
 └── logs/                      # training logs and model weights
 ```
 
 ## Requirements
 
 - **Isaac Sim 5.1** + **Isaac Lab 2.3.1**
-- Python 3.10
+- Python 3.11
 - GPU (≥ 12 GB VRAM recommended for 4096-env training)
+- `libGLU.so.1` (`apt install libglu1-mesa`): without it Isaac Sim hangs while
+  loading the terrain material.
 
 ## Installation
 
@@ -136,47 +144,50 @@ Task IDs are registered in
 ### 1. Training a model
 
 ```bash
-# === Solefoot (SF) ===
-python scripts/rsl_rl/train.py --task Isaac-Limx-SF-TRON2A-Blind-Flat-v0 --num_envs 4096 --headless
+# Blind teacher-student policy
+python scripts/rsl_rl/train.py --task Isaac-Limx-WF-TRON1B-Velocity-Rough-RepTS-LinVel-BlindGP-v0 --headless
 
-# === Wheelfoot (WF) ===
-python scripts/rsl_rl/train.py --task Isaac-Limx-WF-TRON2A-Blind-Flat-v0 --num_envs 4096 --headless
+# Depth-camera policy with latent-dynamics prediction
+python scripts/rsl_rl/train.py --task Isaac-Limx-WF-TRON1B-Velocity-Rough-RepTS-LinVel-Depth-Predict-OursGP-v0 --headless
 ```
 
 *Common options:*
-- `--checkpoint_path <path>`: resume from a specific `.pt` checkpoint.
+- `--num_envs N`: override the task's 4096 environments.
+- `--max_iterations N`: override the runner's 30,000 iterations.
+- `--logger wandb --log_project_name <project>`: log to W&B instead of TensorBoard.
 - `--video`: enable video recording.
-- `--max_iterations N`: override the maximum number of iterations.
 
-Log path: `logs/rsl_rl/<experiment_name>/<timestamp>_<run_name>/`
+Log path: `logs/rsl_rl/<experiment_name>/<timestamp>_<run_name>/`. Every
+checkpoint save also exports the policy to ONNX in the run directory, with the
+deployment metadata the `wf_tron1b_deploy` runtime validates.
 
 ### 2. Running inference (play)
 
-Use the task ID with the `-Play-v0` suffix. The play cfg uses fewer
-envs, disables domain randomization, and simplifies the terrain.
+Use the task ID with the `-Play-v0` suffix: no observation noise, action delay,
+pushes, camera calibration noise or curricula, and robots respawn on random
+terrain patches.
 
 ```bash
-# Solefoot (SF)
-python scripts/rsl_rl/play.py --task Isaac-Limx-SF-TRON2A-Blind-Flat-Play-v0 --num_envs 32
-
-# Wheelfoot (WF)
-python scripts/rsl_rl/play.py --task Isaac-Limx-WF-TRON2A-Blind-Flat-Play-v0 --num_envs 32
+python scripts/rsl_rl/play.py --task Isaac-Limx-WF-TRON1B-Velocity-Rough-RepTS-LinVel-BlindGP-Play-v0 \
+    --checkpoint_path <model.pt>
 ```
 
-*Note:* by default the latest checkpoint is loaded; pass
-`--checkpoint_path` to select a specific one.
+*Options:* `--policy_role teacher` runs the privileged teacher instead of the
+deployable student; `--export_onnx` writes `exported/policy.onnx` next to the
+checkpoint and exits.
 
 ### 3. Resuming a training run
 
-`--resume True` must be passed explicitly for a checkpoint to be
-loaded.
+`--resume True` must be passed explicitly for a checkpoint to be loaded. The
+environment's step counter is restored with it, so the curricula continue where
+they stopped.
 
 ```bash
 # Option A: point directly at a .pt file (recommended)
-python scripts/rsl_rl/train.py --task Isaac-Limx-SF-TRON2A-Blind-Flat-v0 --resume True --checkpoint_path <path_to_model>
+python scripts/rsl_rl/train.py --task <task> --resume True --checkpoint_path <path_to_model>
 
 # Option B: look up a run by name
-python scripts/rsl_rl/train.py --task Isaac-Limx-SF-TRON2A-Blind-Flat-v0 --resume True --load_run <run_name>
+python scripts/rsl_rl/train.py --task <task> --resume True --load_run <run_name>
 ```
 
 ## Robot morphology
@@ -189,26 +200,24 @@ python scripts/rsl_rl/train.py --task Isaac-Limx-SF-TRON2A-Blind-Flat-v0 --resum
 
 ### Registered tasks
 
-| Task ID | Terrain |
-|---|---|
-| `Isaac-Limx-WF-TRON1B-Velocity-Flat-v0` / `-Play-v0` | plane |
-| `Isaac-Limx-WF-TRON1B-Velocity-Rough-v0` / `-Play-v0` | generated (stairs, slopes, obstacles, random rough) |
+| Task ID (append `-Play` before `-v0` to play) | mjlab original | Student policy input |
+|---|---|---|
+| `Isaac-Limx-WF-TRON1B-Velocity-Rough-RepTS-LinVel-BlindGP-v0` | `Mjlab-Velocity-Rough-WF-Tron1B-RepTS-LinVel-BlindGP` | proprioceptive history + command |
+| `Isaac-Limx-WF-TRON1B-Velocity-Rough-RepTS-LinVel-Depth-Predict-OursGP-v0` | `Mjlab-Velocity-Rough-WF-Tron1B-RepTS-LinVel-Depth-Predict-OursGP` | + d435 depth image (CNN + GRU); latent-dynamics prediction |
+
+Both train on the same generated terrain — 20 columns of stairs, slopes,
+obstacles, random roughness, random boxes, stepping stones and tilted grids,
+interleaved with flat ground — under a terrain-level curriculum.
+
+The robot USD is generated from the shipped MJCF and committed; to regenerate it:
 
 ```bash
-# Train
-python scripts/rsl_rl/train.py --task Isaac-Limx-WF-TRON1B-Velocity-Flat-v0 --num_envs 4096 --headless
-
-# Play a checkpoint
-python scripts/rsl_rl/play.py --task Isaac-Limx-WF-TRON1B-Velocity-Flat-Play-v0 \
-    --num_envs 32 --checkpoint_path <model.pt>
-
-# One-off: generate the USD from the shipped MJCF
 python scripts/tools/convert_wf_tron1b_mjcf.py --headless
 ```
 
 The TRON2A task configurations were removed when the vendored `rsl_rl` was
-re-synced from `v2.0.1` to `v5.3.0`; they were written against the old runner
-API. Their USD and STL assets are retained. See `CHANGELOG.md`.
+re-synced from `v2.0.1` to `v5.3.0`; their USD and STL assets are retained.
+See `CHANGELOG.md`.
 
 ## Architecture overview
 
@@ -223,15 +232,16 @@ The project is organized into three main parts:
 
 ### Task wiring flow
 
-Taking `Isaac-Limx-SF-TRON2A-Blind-Flat-v0` as an example:
+Taking `Isaac-Limx-WF-TRON1B-Velocity-Rough-RepTS-LinVel-BlindGP-v0` as an example:
 
-1. **Gym registration**: in `tasks/locomotion/robots/__init__.py`,
-   the environment configuration and PPO configuration are bound to
-   the task ID.
-2. **Env cfg**: `tasks/locomotion/robots/limx_solefoot_tron2a_env_cfg.py`
-   defines asset loading and MDP rules.
-3. **Asset cfg**: `assets/config/solefoot_tron2a_cfg.py` specifies
-   the built-in USD path and actuator parameters.
+1. **Gym registration**: `tasks/locomotion/robots/__init__.py` binds the task ID
+   to an env cfg class and a runner cfg factory.
+2. **Env cfg**: `tasks/locomotion/robots/wf_tron1b_env_cfg.py` (train, play and
+   depth variants) on top of `tasks/locomotion/cfg/WF_TRON1B/wf_tron1b_base_env_cfg.py`
+   (scene, observations, actions, commands, events, rewards, terminations,
+   curricula), with the tunables in `cfg/WF_TRON1B/constants.py`.
+3. **Runner cfg**: `tasks/locomotion/agents/wf_tron1b_rsl_rl_cfg.py`.
+4. **Asset cfg**: `assets/config/wheelfoot_tron1b_cfg.py` (USD path and actuators).
 
 ## MuJoCo simulation and real-hardware deployment
 
@@ -320,11 +330,19 @@ git ls-files | grep -iE \
   && echo "!! training artifacts staged" && exit 1 || echo "ok"
 ```
 
+The unit tests (MDP kernels against mjlab's reference implementations,
+terrains, depth buffer, domain randomisation, ONNX metadata) need the
+training environment's Python packages but not Isaac Sim:
+
+```bash
+python -m pytest tests
+```
+
 On a machine with Isaac Sim 5.1 / Isaac Lab 2.3.1 installed, a short
 end-to-end smoke run is:
 
 ```bash
-python scripts/rsl_rl/train.py --task Isaac-Limx-SF-TRON2A-Blind-Flat-v0 \
+python scripts/rsl_rl/train.py --task Isaac-Limx-WF-TRON1B-Velocity-Rough-RepTS-LinVel-BlindGP-v0 \
   --num_envs 16 --headless --max_iterations 2
 ```
 
