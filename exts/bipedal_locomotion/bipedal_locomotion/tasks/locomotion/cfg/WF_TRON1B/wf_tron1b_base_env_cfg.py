@@ -44,11 +44,11 @@ from . import constants as C
 from .terrain_cfg import WF_TRON1B_TERRAINS_CFG
 
 # Frequently reused entity selections. `preserve_order=True` everywhere: see constants.py.
-_LEG_JOINTS = SceneEntityCfg("robot", joint_names=list(C.LEG_JOINT_NAMES), preserve_order=True)
-_WHEEL_JOINTS = SceneEntityCfg("robot", joint_names=list(C.WHEEL_JOINT_NAMES), preserve_order=True)
-_ALL_JOINTS = SceneEntityCfg("robot", joint_names=list(C.ALL_JOINT_NAMES), preserve_order=True)
-_WHEEL_BODIES = SceneEntityCfg("robot", body_names=list(C.WHEEL_BODY_NAMES), preserve_order=True)
-_BASE_BODY = SceneEntityCfg("robot", body_names=[C.BASE_BODY])
+_LEG_JOINTS = SceneEntityCfg(C.ROBOT_ENTITY, joint_names=list(C.LEG_JOINT_NAMES), preserve_order=True)
+_WHEEL_JOINTS = SceneEntityCfg(C.ROBOT_ENTITY, joint_names=list(C.WHEEL_JOINT_NAMES), preserve_order=True)
+_ALL_JOINTS = SceneEntityCfg(C.ROBOT_ENTITY, joint_names=list(C.ALL_JOINT_NAMES), preserve_order=True)
+_WHEEL_BODIES = SceneEntityCfg(C.ROBOT_ENTITY, body_names=list(C.WHEEL_BODY_NAMES), preserve_order=True)
+_BASE_BODY = SceneEntityCfg(C.ROBOT_ENTITY, body_names=[C.BASE_BODY])
 _WHEEL_CONTACTS = SceneEntityCfg(C.CONTACT_SENSOR, body_names=list(C.WHEEL_BODY_NAMES), preserve_order=True)
 _ILLEGAL_CONTACTS = SceneEntityCfg(C.CONTACT_SENSOR, body_names=list(C.NON_WHEEL_BODY_NAMES))
 _ROBOT_CONTACTS = SceneEntityCfg(C.CONTACT_SENSOR)
@@ -82,7 +82,6 @@ class WF_TRON1B_SceneCfg(InteractiveSceneCfg):
         terrain_type="generator",
         terrain_generator=WF_TRON1B_TERRAINS_CFG,
         max_init_terrain_level=8,
-        collision_group=-1,
         # MuJoCo combines the friction of two geoms by taking the max; "max" makes PhysX
         # do the same, so the randomised wheel friction only matters where it exceeds 1.
         physics_material=sim_utils.RigidBodyMaterialCfg(
@@ -91,7 +90,6 @@ class WF_TRON1B_SceneCfg(InteractiveSceneCfg):
             static_friction=1.0,
             dynamic_friction=1.0,
         ),
-        debug_vis=False,
     )
 
     robot = WHEELFOOT_TRON1B_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
@@ -100,12 +98,10 @@ class WF_TRON1B_SceneCfg(InteractiveSceneCfg):
     # Yaw-aligned so the map turns with the robot but does not tilt with it.
     terrain_scan = RayCasterCfg(
         prim_path="{ENV_REGEX_NS}/Robot/" + C.BASE_BODY,
-        offset=RayCasterCfg.OffsetCfg(pos=(0.0, 0.0, 0.0)),
         ray_alignment="yaw",
         pattern_cfg=patterns.GridPatternCfg(resolution=C.TERRAIN_SCAN_RESOLUTION, size=C.TERRAIN_SCAN_SIZE),
         max_distance=C.TERRAIN_SCAN_MAX_DISTANCE,
         mesh_prim_paths=["/World/ground"],
-        debug_vis=False,
     )
 
     # Per-wheel scans. Isaac Lab's RayCaster binds one prim per environment (a regex in
@@ -118,26 +114,12 @@ class WF_TRON1B_SceneCfg(InteractiveSceneCfg):
     # which the clearance reward would read as the wheel having been lifted.
     wheel_height_scan_L = RayCasterCfg(
         prim_path="{ENV_REGEX_NS}/Robot/wheel_L_Link",
-        offset=RayCasterCfg.OffsetCfg(pos=(0.0, 0.0, 0.0)),
         ray_alignment="world",
-        pattern_cfg=patterns.GridPatternCfg(
-            resolution=C.WHEEL_HEIGHT_SCAN_RESOLUTION, size=C.WHEEL_HEIGHT_SCAN_SIZE
-        ),
+        pattern_cfg=patterns.GridPatternCfg(resolution=C.WHEEL_HEIGHT_SCAN_RESOLUTION, size=C.WHEEL_HEIGHT_SCAN_SIZE),
         max_distance=C.WHEEL_HEIGHT_MAX_DISTANCE,
         mesh_prim_paths=["/World/ground"],
-        debug_vis=False,
     )
-    wheel_height_scan_R = RayCasterCfg(
-        prim_path="{ENV_REGEX_NS}/Robot/wheel_R_Link",
-        offset=RayCasterCfg.OffsetCfg(pos=(0.0, 0.0, 0.0)),
-        ray_alignment="world",
-        pattern_cfg=patterns.GridPatternCfg(
-            resolution=C.WHEEL_HEIGHT_SCAN_RESOLUTION, size=C.WHEEL_HEIGHT_SCAN_SIZE
-        ),
-        max_distance=C.WHEEL_HEIGHT_MAX_DISTANCE,
-        mesh_prim_paths=["/World/ground"],
-        debug_vis=False,
-    )
+    wheel_height_scan_R = wheel_height_scan_L.replace(prim_path="{ENV_REGEX_NS}/Robot/wheel_R_Link")
 
     # Every robot body (incl. the wheel-motor housing links), filtered on the terrain mesh: the force
     # matrix is the terrain contact (mjlab's wheel / illegal-ground sensors), net minus matrix the
@@ -172,7 +154,6 @@ class CommandsCfg:
         rel_forward_envs=0.2,
         heading_command=True,
         heading_control_stiffness=1.0,
-        debug_vis=False,
         ranges=mdp.WheeledUniformVelocityCommandCfg.Ranges(
             lin_vel_x=(-1.0, 2.0),
             lin_vel_y=(-1.0, 1.0),
@@ -321,9 +302,9 @@ class ObservationsCfg:
 
 
 # MJCF-ordered selections: the layout of mjlab's privileged DR observation.
-_MJCF_JOINTS = SceneEntityCfg("robot", joint_names=list(C.MJCF_JOINT_NAMES), preserve_order=True)
-_MJCF_BODIES = SceneEntityCfg("robot", body_names=list(C.MJCF_BODY_NAMES), preserve_order=True)
-_MJCF_LINKS = SceneEntityCfg("robot", body_names=list(C.MJCF_BODY_NAMES[1:]), preserve_order=True)
+_MJCF_JOINTS = SceneEntityCfg(C.ROBOT_ENTITY, joint_names=list(C.MJCF_JOINT_NAMES), preserve_order=True)
+_MJCF_BODIES = SceneEntityCfg(C.ROBOT_ENTITY, body_names=list(C.MJCF_BODY_NAMES), preserve_order=True)
+_MJCF_LINKS = SceneEntityCfg(C.ROBOT_ENTITY, body_names=list(C.MJCF_BODY_NAMES[1:]), preserve_order=True)
 
 
 @configclass
@@ -383,7 +364,6 @@ class EventsCfg:
                 "pitch": (-0.25, 0.25),
                 "yaw": (-0.2, 0.2),
             },
-            "asset_cfg": SceneEntityCfg("robot"),
         },
     )
     reset_leg_joints = EventTerm(
@@ -714,7 +694,6 @@ class WF_TRON1B_BaseEnvCfg(ManagerBasedRLEnvCfg):
         for scan in (self.scene.terrain_scan, self.scene.wheel_height_scan_L, self.scene.wheel_height_scan_R):
             scan.update_period = self.decimation * self.sim.dt
         self.scene.contact_forces.update_period = self.sim.dt
-        self.scene.terrain.terrain_generator.curriculum = True
 
         self.viewer.origin_type = "env"
 
