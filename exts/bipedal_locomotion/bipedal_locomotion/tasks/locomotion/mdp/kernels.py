@@ -37,6 +37,7 @@ __all__ = [
     "roughness_gate_active",
     "roughness_gate_inactive",
     "scheduled_gate_threshold",
+    "segment_sums",
     "smoothstep_gate",
     "terrain_normal_from_points",
     "terrain_roughness_from_height_samples",
@@ -485,6 +486,24 @@ def encode_contact_forces(forces_b: torch.Tensor) -> torch.Tensor:
     """
     flat = torch.nan_to_num(forces_b, nan=0.0, posinf=0.0, neginf=0.0).flatten(start_dim=1)
     return torch.sign(flat) * torch.log1p(torch.abs(flat))
+
+
+def segment_sums(values: torch.Tensor, starts: torch.Tensor, counts: torch.Tensor) -> torch.Tensor:
+    """Sum ``values[start : start + count]`` for each segment, without a host sync.
+
+    Args:
+        values: Rows to sum, shape ``[M, D]``.
+        starts: First row of each segment, shape ``[S]``.
+        counts: Rows in each segment, shape ``[S]``. An empty segment sums to 0 whatever its start.
+
+    Returns:
+        Per-segment sums, shape ``[S, D]``. Differences of a float64 cumulative sum, so a segment
+        stays exact to float32 precision however large the rows before it are.
+    """
+    cumsum = torch.nn.functional.pad(values.double().cumsum(dim=0), (0, 0, 1, 0))
+    starts = starts.long().clamp(0, values.shape[0])
+    ends = (starts + counts.long()).clamp(max=values.shape[0])
+    return (cumsum[ends] - cumsum[starts]).to(values.dtype)
 
 
 def contact_substep_count(force_history: torch.Tensor, threshold: float) -> torch.Tensor:

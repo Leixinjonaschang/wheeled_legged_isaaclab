@@ -9,7 +9,7 @@ terrain above the frame reads 0 (see :func:`clearance_samples`).
 Contacts: mjlab's contact sensors filter contacts by partner (terrain / robot subtree). Here one
 robot-wide :class:`ContactSensor` is filtered on the terrain mesh: its force matrix is the terrain
 contact and the remainder of the net force is robot-on-robot contact. Both are normal forces acting
-on the robot; Isaac Lab reports no friction forces.
+on the robot; the terrain friction is read from PhysX separately (:func:`terrain_friction_forces`).
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING
 
 import torch
 
-from .kernels import heights_from_raycast
+from .kernels import heights_from_raycast, segment_sums
 
 if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
@@ -31,6 +31,7 @@ __all__ = [
     "self_contact_forces",
     "stack_clearance_samples",
     "terrain_forces",
+    "terrain_friction_forces",
 ]
 
 
@@ -39,6 +40,20 @@ def terrain_forces(env: ManagerBasedRLEnv, sensor_cfg: SceneEntityCfg, history: 
     data = env.scene[sensor_cfg.name].data
     forces = data.force_matrix_w_history if history else data.force_matrix_w
     return forces.sum(dim=-2)[..., sensor_cfg.body_ids, :]
+
+
+def terrain_friction_forces(env: ManagerBasedRLEnv, sensor_cfg: SceneEntityCfg) -> torch.Tensor:
+    """World-frame terrain friction force on each selected body, ``[B, N, 3]``.
+
+    Isaac Lab's contact sensor reports normal forces only, so the friction is read from its PhysX contact
+    view, one row per contact point, and summed per body without a host sync (the PhysX read itself blocks,
+    like the sensor's own force reads). The view holds ``max_contact_data_count_per_prim`` rows per body;
+    the rough terrain fills about a sixth of the default.
+    """
+    sensor = env.scene[sensor_cfg.name]
+    friction, _, counts, starts = sensor.contact_physx_view.get_friction_data(dt=env.physics_dt)
+    per_pair = segment_sums(friction, starts.view(-1), counts.view(-1))  # [B * bodies * filters, 3]
+    return per_pair.view(env.num_envs, sensor.num_bodies, -1, 3).sum(dim=-2)[:, sensor_cfg.body_ids]
 
 
 def self_contact_forces(env: ManagerBasedRLEnv, sensor_cfg: SceneEntityCfg) -> torch.Tensor:

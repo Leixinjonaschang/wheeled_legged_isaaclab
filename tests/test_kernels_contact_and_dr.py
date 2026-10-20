@@ -41,6 +41,23 @@ class TestEncodeContactForces:
         assert torch.allclose(out, torch.zeros(1, 3))
 
 
+class TestSegmentSums:
+    """Per-pair sums of PhysX's per-contact friction buffer (start index + count per sensor/filter pair)."""
+
+    def test_sums_each_segment_and_leaves_empty_ones_at_zero(self):
+        values = torch.arange(12, dtype=torch.float32).view(6, 2)
+        starts = torch.tensor([0, 2, 5, 4_294_967_295], dtype=torch.int64)  # last: unset start of an empty pair
+        counts = torch.tensor([2, 3, 1, 0], dtype=torch.int64)
+        out = kernels.segment_sums(values, starts, counts)
+        expected = torch.stack([values[0:2].sum(0), values[2:5].sum(0), values[5:6].sum(0), torch.zeros(2)])
+        assert torch.equal(out, expected)
+
+    def test_large_rows_before_a_segment_do_not_cost_precision(self):
+        values = torch.tensor([[1.0e6], [0.3], [0.4]])  # a float32 running sum would be off by up to 0.06 here
+        out = kernels.segment_sums(values, torch.tensor([1]), torch.tensor([2]))
+        assert out.item() == pytest.approx(0.7, abs=1e-6)
+
+
 class TestAirTimeBalanceCost:
     MIN_TOTAL = 1.0
     TOLERANCE = 0.2
