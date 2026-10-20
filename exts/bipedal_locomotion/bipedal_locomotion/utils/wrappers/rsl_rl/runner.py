@@ -78,6 +78,20 @@ class WheeledLeggedVelocityOnPolicyRunner(OnPolicyRunner):
             dynamo=False,
         )
 
+    def export_onnx_with_metadata(self, path: str, filename: str = "policy.onnx") -> str:
+        """Export the policy to ``path/filename`` and attach the deployment metadata; returns the file path."""
+        self.export_policy_to_onnx(path, filename)
+        run_name = "local"
+        if getattr(self.logger, "logger_type", None) == "wandb":  # only set once learn() starts logging
+            import wandb
+
+            if wandb.run is not None:
+                run_name = wandb.run.name
+        onnx_path = os.path.join(path, filename)
+        metadata = get_wheeled_legged_metadata(self.env.unwrapped, run_name, self.alg.get_policy())
+        attach_metadata_to_onnx(onnx_path, metadata)
+        return onnx_path
+
     @staticmethod
     def _get_export_paths(checkpoint_path: str) -> tuple[Path, str, Path]:
         """Resolve the ONNX export directory and file name from a checkpoint path."""
@@ -98,18 +112,9 @@ class WheeledLeggedVelocityOnPolicyRunner(OnPolicyRunner):
 
         # ONNX export is best-effort: a broken export must not lose a training run.
         policy_dir, filename, onnx_path = self._get_export_paths(path)
-        logger_type = getattr(self.logger, "logger_type", None)  # only set once learn() starts logging
         try:
-            self.export_policy_to_onnx(str(policy_dir), filename)
-            run_name = "local"
-            if logger_type == "wandb":
-                import wandb
-
-                if wandb.run is not None:
-                    run_name = wandb.run.name
-            metadata = get_wheeled_legged_metadata(self.env.unwrapped, run_name, self.alg.get_policy())
-            attach_metadata_to_onnx(str(onnx_path), metadata)
-            if logger_type == "wandb" and self.cfg.get("upload_model"):
+            self.export_onnx_with_metadata(str(policy_dir), filename)
+            if getattr(self.logger, "logger_type", None) == "wandb" and self.cfg.get("upload_model"):
                 import wandb
 
                 wandb.save(str(onnx_path), base_path=str(policy_dir))
