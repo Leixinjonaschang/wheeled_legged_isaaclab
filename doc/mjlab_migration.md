@@ -42,8 +42,14 @@
 | `mjlab-port/terrain` | 20 列地形（含 4 种 mjlab box 地形）+ mjlab 课程语义 |
 | `mjlab-port/mdp-resync` | 奖励 / 终止 / 指令 / 课程 / 动作 / 观测与当前 mjlab 对齐 |
 | `mjlab-port/domain-randomization` | 87 维 dynamics context 对应的全部 DR |
-| `mjlab-port/blind-task` | 组装 env、注册 BlindGP、脚本、运行时验证 |
-| `mjlab-port/depth-task` | 深度相机、异步深度缓存、相机 DR、OursGP、运行时验证 |
+| `mjlab-port/depth-camera` | 带机器人自遮挡的射线深度相机、异步深度缓存、相机标定 DR |
+| `mjlab-port/wheel-motor-link` | 轮毂电机外壳独立成 link（D25） |
+| `mjlab-port/blind-task` | 组装 env、注册 BlindGP、脚本、ONNX 元数据、运行时验证 |
+| `mjlab-port/remove-tron2a-mdp` | 删除 TRON2A 时代的遗留 MDP 代码（D34） |
+| `mjlab-port/depth-task` | OursGP（深度 + latent dynamics predictor）、运行时验证 |
+| `mjlab-port/docs` | README / CHANGELOG |
+| `mjlab-port/final-cleanup` | 最终 code review 的清理（过时注释、死代码、重复参数），play 的编码器偏差与 ONNX 元数据修复 |
+| `mjlab-port/parity-fixes` | 最终行为对齐 review 的修复 |
 
 ## 4. 运行环境
 
@@ -79,7 +85,7 @@
 | D7 | 深度相机实现 | `RayCasterCamera`（地形）+ 对机器人自身轮子/膝部可视 mesh 的射线投射，逐像素取 min；只在 30 Hz 采样步计算 | mjlab 的相机本身就是对 geom group 0/1 的 BVH 射线投射：用训好的 OursGP 实测 27% 的帧能看到自己的轮子，必须复现。该实现与 mjlab 渲染逐像素一致（机器人掩码 IoU=1.000，深度误差 ≤1.3e-5 m）；4096 env 下每迭代约 +5%。TiledCamera 在本机 Isaac Sim 5.1 的 RTX 启动即段错误，且在共享 stage 上会看到相邻 env 的机器人。 |
 | D8 | 默认 logger | tensorboard | 本仓库惯例；mjlab 默认 wandb（project `mjlab`）。命令行 `--logger wandb` 可切换。 |
 | D9 | `num_envs` | 4096 | 与 mjlab 默认一致（旧 port 为 2048）。 |
-| D10 | 接触检测 | 一个覆盖全部 9 个 link 的接触传感器，按地形 mesh 过滤：force matrix = 地形接触（轮子 / 非法接触），net − matrix = 机器人自身接触（self-collision），历史 4 个物理子步 | mjlab 的接触传感器显式过滤 `secondary=terrain` / 自身子树；已运行时验证过滤与自碰撞分离正确。 |
+| D10 | 接触检测 | 一个覆盖机器人全部 11 个 body（9 个 link + D25 的 2 个电机外壳 link）的接触传感器，按地形 mesh 过滤：force matrix = 地形接触（轮子 / 非法接触），net − matrix = 机器人自身接触（self-collision），历史 4 个物理子步 | mjlab 的接触传感器显式过滤 `secondary=terrain` / 自身子树；已运行时验证过滤与自碰撞分离正确。 |
 | D11 | 编码器偏差语义 | 从位置目标中减去偏差，观测用真实关节角 | mjlab `joint_pos_rel(biased=False)`。 |
 | D12 | 训练无关的 mjlab 部件 | 不迁移：`prepare_quantities`、`clear_non_finite_sim_data`、`mean_action_acc` metric、play 时的 debug 可视化、MuJoCo solver 参数（iterations/ccd/nconmax） | 无 PhysX 对应物或不影响训练。 |
 | D13 | `init_velocity_prob`、零权重的 `heading_progress` | 删除 | 目标任务中都不生效（0），mjlab 已删 `heading_progress`。 |
@@ -95,12 +101,12 @@
 | D23 | 地形缓存与随机种子 | `use_cache=False`、`seed=None`（与 mjlab 相同，每次运行重新生成） | 50×20 网格生成 + 导入约 12 s。 |
 | D24 | 奖励/终止项写的 `Metrics/*` | 先暂存在 env 上，由 RSL-RL wrapper 在 step 后并入 `extras["log"]` | Isaac Lab 在任意 env reset 时重建 `extras["log"]`（mjlab 只在 step 开头清），否则这些指标几乎每步都会被丢掉。只影响日志。 |
 | D25 | 膝部 `wheel_motor_[LR]_collision` 的地形接触 | USD 中把它移到各自 1 g 的 `wheel_motor_[LR]_Link`（fixed joint 固定在膝上，位姿/碰撞不变，对 hip/wheel 做 filtered pair），不计入非法接触，只计入 self-collision | mjlab 按 geom 区分接触，该 geom 既不在轮子组也不在非法组；Isaac Lab 按 body 感知，留在膝 body 上时每次外壳触地都算膝部非法接触。sim2sim（mjlab 训好的 OursGP）中这是 Isaac Lab 摔倒率高 1.6–1.8× 的原因：修复后 teacher 0.48 vs mjlab 0.48 次/env-min，膝部非法接触 26/32 vs 27/22；总质量 +2 g。 |
-| D26 | "接触"的判定 | 地形接触力 > 1 N（与 air time 用同一阈值） | mjlab 用"存在接触点"（`found > 0`）；PhysX 没有等价量。 |
+| D26 | "接触"的判定 | 地形接触力 > 1 N（与 air time 用同一阈值） | mjlab 用"存在接触点"（`found > 0`）；PhysX 没有等价量。Isaac Lab 自带的 air time / first contact 用的是含自碰撞的 net force，所以轮子碰到自身其它 link 时在那里也算着地（罕见）。 |
 | D27 | 力矩 / 功率类奖励的力矩来源 | Isaac Lab 隐式执行器的 `applied_torque` 估计 | MuJoCo 用 `actuator_force` / `qfrc_actuator`；PhysX 不暴露隐式驱动的实际力矩。 |
 | D28 | 深度相机自遮挡包含哪些 link | 只投射 `wheel_L/R`、`knee_L/R` 的可视 mesh | mjlab 实测机器人像素 99% 来自这 4 个 link；与 mjlab 渲染对比 IoU=1.000（极端摆腿姿态下差 2 个像素，来自 abad/hip）。全部 9 个 link 可完全一致，但成本约 2.5 倍。 |
 | D29 | `non_finite_physics` 检查哪些传感器 | 只检查接触传感器（与 mjlab 一致） | 读取其它传感器的数据会强制懒更新的深度相机每步渲染；mjlab 只在 30 Hz 采样步读相机。 |
-| D30 | 任务命名与 runner 配置写法 | `Isaac-Limx-WF-TRON1B-Velocity-Rough-RepTS-LinVel-{BlindGP,Depth-Predict-OursGP}-v0`（+`-Play-v0`）；runner 配置用与 mjlab `rl_cfg.py` 同名的工厂函数 | 沿用本仓库 `Isaac-Limx-...` 前缀；工厂函数与 mjlab 一一对应，`asdict` 与 mjlab 仅 logger 字段不同（D8）。 |
+| D30 | 任务命名与 runner 配置写法 | `Isaac-Limx-WF-TRON1B-Velocity-Rough-RepTS-LinVel-{BlindGP,Depth-Predict-OursGP}-v0`（+`-Play-v0`）；runner 配置用与 mjlab `rl_cfg.py` 同名的工厂函数 | 沿用本仓库 `Isaac-Limx-...` 前缀；工厂函数与 mjlab 一一对应，`asdict` 与 mjlab 仅 `logger`（D8）和 `wandb_project`（本仓库原有的 `tron1b_rl_lab`，mjlab 为 `mjlab`）不同。 |
 | D31 | ONNX 元数据 | 与 mjlab `get_wheeled_legged_metadata` 同字段、同序列化（3 位小数、嵌套用 `;`），关节相关字段按 MJCF 关节顺序，轮子 stiffness 报 kv（与 MuJoCo gainprm 一致） | 部署仓库按这些字段做校验；导出的 BlindGP / OursGP ONNX 均通过部署仓库自己的 validator，同一 checkpoint 的输出与 mjlab 导出的 ONNX 一致。 |
-| D32 | 与 mjlab 的训练曲线对比口径 | 2048 env、同迭代数；终止项按"各原因占比"比较 | mjlab 4096 env 在这台共享 GPU 上 OOM（2048 env 已用 15 GB）；Isaac Lab 记录的是各终止项占比，mjlab 记录的是每次 reset 的计数。 |
+| D32 | 与 mjlab 的训练曲线对比口径 | BlindGP：同一台机器上 mjlab HEAD 与 Isaac Lab 各跑 2048 env；OursGP：以论文 3 个 seed（`ours_seed42/44/46`）为参照带，Isaac Lab 单卡 2048 env、seed 42。只比 episode 长度、地形等级、奖励和各项 loss，不比终止项占比 | mjlab 4096 env 在这台共享 GPU 上 OOM。论文 run 是 2 GPU × 2048 env（`env.yaml` 里的 2048 是每个 rank 的，曲线只来自 rank 0），除 `num_envs`、seed 和运行时回填字段外与 mjlab HEAD 的配置逐项一致；seed 间差异很大（it400 地形等级 0.67–1.85），所以用参照带而不是单个 seed。Isaac Lab 记录的是"各 env 最近一个 episode 的终止原因"占比（每个 env 计一次），mjlab 记录每步 reset 的计数（每个 episode 计一次，失败多的 env 权重更大），两者口径不同。 |
 | D33 | sim2sim 中剩余的差异 | 记为仿真器间固有差异，不做修正 | 用 mjlab 训好的 OursGP：teacher 摔倒率 0.48 vs 0.46 次/env-min（持平），student 1.49 vs 0.79；同一 teacher 轨迹上 student 的潜变量/速度/粗糙度估计两边一致，固定位姿下深度（≤8.3e-6 m）与本体观测完全一致，故 student 差距是 MuJoCo 蒸馏出的 student 对 PhysX 动力学偏移更敏感的闭环效应。另：yaw 角速度跟踪误差 Isaac Lab 高约 20%（物理/接触模型差异）。 |
-| D34 | TRON2A 时代遗留的 MDP 代码 | 删除 `mdp/{observations,rewards,events,curriculums}.py`、gait command、`actuators/`（延迟执行器）和 `utils/math.py` 中只被它们使用的函数 | TRON2A 任务早已注销，这些代码无人使用；唯一与 WF-TRON1B 配置重名的 `generated_commands` 与 Isaac Lab 内置实现完全相同。需要时可从 git 历史恢复。 |
+| D34 | TRON2A 时代遗留的 MDP 代码 | 删除 `mdp/{observations,rewards,events,curriculums}.py`、gait command、`actuators/`（延迟执行器）和 `utils/math.py` 中只被它们使用的函数 | TRON2A 任务早已注销，这些代码无人使用；唯一与 WF-TRON1B 配置重名的 `generated_commands` 与 Isaac Lab 内置实现完全相同。需要时可从 git 历史恢复。TRON2A 的 USD 资产（`assets/usd/{SF,WF}_TRON2A`，136 MB）同样无人引用，但属于原公开发布内容，未删。 |
