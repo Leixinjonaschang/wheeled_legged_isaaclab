@@ -1,5 +1,5 @@
-"""Startup domain randomisation (mjlab's set and order), recording what each event sampled, and the
-depth camera's per-reset calibration randomisation.
+"""Startup domain randomisation (mjlab's set and order), recording what each event sampled, the
+depth camera's per-reset calibration randomisation, and the reset and push events.
 
 Isaac Lab's stock randomisation writes into PhysX and keeps no record. Every startup event here also
 stores its draw in :class:`~.domain_randomization.DomainRandomizationState`, which the
@@ -12,7 +12,9 @@ from typing import TYPE_CHECKING
 
 import torch
 
+import isaaclab.utils.math as math_utils
 from isaaclab.actuators import ImplicitActuator
+from isaaclab.envs.mdp.events import reset_root_state_uniform as _isaaclab_reset_root_state_uniform
 from isaaclab.managers import SceneEntityCfg
 
 from .domain_randomization import get_dr_state
@@ -21,6 +23,7 @@ if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
 
 __all__ = [
+    "push_by_setting_velocity",
     "randomize_com_offset",
     "randomize_depth_camera",
     "randomize_encoder_bias",
@@ -28,6 +31,7 @@ __all__ = [
     "randomize_pd_gains",
     "randomize_terrain",
     "randomize_wheel_friction",
+    "reset_root_state_uniform",
 ]
 
 
@@ -219,6 +223,43 @@ def randomize_depth_camera(
         pitch=torch.empty(count, device=env.device).uniform_(*pitch_range),
         fovy_deg=torch.empty(count, device=env.device).uniform_(*fovy_range_deg),
     )
+
+
+def _sample_root_velocity(velocity_range: dict[str, tuple[float, float]], num: int, device) -> torch.Tensor:
+    """``[num, 6]`` uniform draws over Isaac Lab's ``x`` .. ``yaw`` velocity ranges (a missing key is 0)."""
+    keys = ("x", "y", "z", "roll", "pitch", "yaw")
+    ranges = torch.tensor([velocity_range.get(key, (0.0, 0.0)) for key in keys], device=device)
+    return math_utils.sample_uniform(ranges[:, 0], ranges[:, 1], (num, 6), device=device)
+
+
+def reset_root_state_uniform(
+    env: ManagerBasedRLEnv,
+    env_ids: torch.Tensor,
+    pose_range: dict[str, tuple[float, float]],
+    velocity_range: dict[str, tuple[float, float]],
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> None:
+    """Isaac Lab's ``reset_root_state_uniform``, but the sampled velocity is the root *link*'s, as in mjlab.
+
+    Isaac Lab sets it on the root centre of mass; the linear parts differ by ``omega x r_com``.
+    """
+    _isaaclab_reset_root_state_uniform(env, env_ids, pose_range, {}, asset_cfg)
+    asset = env.scene[asset_cfg.name]
+    velocity = asset.data.default_root_state[env_ids, 7:13]
+    velocity = velocity + _sample_root_velocity(velocity_range, len(env_ids), env.device)
+    asset.write_root_link_velocity_to_sim(velocity, env_ids=env_ids)
+
+
+def push_by_setting_velocity(
+    env: ManagerBasedRLEnv,
+    env_ids: torch.Tensor,
+    velocity_range: dict[str, tuple[float, float]],
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
+) -> None:
+    """Isaac Lab's ``push_by_setting_velocity``, but on the root *link* velocity, as in mjlab."""
+    asset = env.scene[asset_cfg.name]
+    velocity = asset.data.root_link_vel_w[env_ids] + _sample_root_velocity(velocity_range, len(env_ids), env.device)
+    asset.write_root_link_velocity_to_sim(velocity, env_ids=env_ids)
 
 
 def randomize_terrain(env: ManagerBasedRLEnv, env_ids: torch.Tensor | None) -> None:
