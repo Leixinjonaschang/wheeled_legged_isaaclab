@@ -54,8 +54,13 @@ def wheel_contact_forces(
     sensor_cfg: SceneEntityCfg,
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot"),
 ) -> torch.Tensor:
-    """Log-compressed wheel-terrain contact forces in the base frame, ``[B, num_wheels * 3]``."""
-    forces_w = terrain_forces(env, sensor_cfg)  # [B, N, 3]
+    """Log-compressed normal force each wheel exerts on the terrain, in the base frame, ``[B, num_wheels * 3]``.
+
+    mjlab's ``netforce`` reads from the wheel onto the terrain, the opposite of the force PhysX reports on
+    the wheel. It also includes friction, which PhysX only returns through a call that blocks on the GPU,
+    so the friction part is left out.
+    """
+    forces_w = -terrain_forces(env, sensor_cfg)  # [B, N, 3]
     root_quat_w = env.scene[asset_cfg.name].data.root_link_quat_w[:, None, :]
     return encode_contact_forces(quat_apply_inverse(root_quat_w, forces_w))
 

@@ -8,7 +8,8 @@ terrain above the frame reads 0 (see :func:`clearance_samples`).
 
 Contacts: mjlab's contact sensors filter contacts by partner (terrain / robot subtree). Here one
 robot-wide :class:`ContactSensor` is filtered on the terrain mesh: its force matrix is the terrain
-contact and the remainder of the net force is robot-on-robot contact.
+contact and the remainder of the net force is robot-on-robot contact. Both are normal forces acting
+on the robot; Isaac Lab reports no friction forces.
 """
 
 from __future__ import annotations
@@ -34,7 +35,7 @@ __all__ = [
 
 
 def terrain_forces(env: ManagerBasedRLEnv, sensor_cfg: SceneEntityCfg, history: bool = False) -> torch.Tensor:
-    """World-frame terrain contact force per selected body, ``[B, N, 3]`` (``[B, H, N, 3]`` with history)."""
+    """World-frame normal terrain force on each selected body, ``[B, N, 3]`` (``[B, H, N, 3]`` with history)."""
     data = env.scene[sensor_cfg.name].data
     forces = data.force_matrix_w_history if history else data.force_matrix_w
     return forces.sum(dim=-2)[..., sensor_cfg.body_ids, :]
