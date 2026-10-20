@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added — WF-TRON1B RepTS tasks, re-synced with mjlab (`wheeled_legged_mjlab@5e7c1af`)
 
-Plan, verification and every judgement call (D1–D34) are in
+Plan, verification and every judgement call (D1–D42) are in
 [`doc/mjlab_migration.md`](doc/mjlab_migration.md).
 
 - **Two tasks** (+ `-Play-v0`): `Isaac-Limx-WF-TRON1B-Velocity-Rough-RepTS-LinVel-BlindGP-v0`
@@ -44,6 +44,17 @@ Plan, verification and every judgement call (D1–D34) are in
   `extras["log"]` in `_reset_idx`); they are now merged after the step.
 - `non_finite_physics` read every sensor each step, which would force the lazily updated depth
   camera to render every step; it now checks contact sensors only, as mjlab does.
+- Wheel height scans started at the wheel centre, so beside a step taller than the centre they
+  hit the step's underside and read the floor clearance. They now cast from above the wheel and
+  read 0 there, as mjlab does (D35).
+- `wheel_contact_forces` reported the normal force acting on each wheel; it now reports the force
+  the wheel exerts on the terrain, friction included, as mjlab's `netforce` does (D36).
+- Sensors with a non-zero `update_period` skipped refreshes after 16 s of an episode (Isaac Lab's
+  float32 sensor clock), and `soft_landing` missed touchdowns that began in a step's first
+  substep (D39).
+- Reset and push velocities were set on the centre of mass instead of the root link (D40).
+- `play.py --export_onnx` wrote no deployment metadata; it now writes the same metadata as
+  training checkpoints.
 
 ### Removed
 
