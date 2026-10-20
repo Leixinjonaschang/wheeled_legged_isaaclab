@@ -1,23 +1,18 @@
 """The ONNX deployment metadata matches what mjlab exports and what ``wf_tron1b_deploy`` validates."""
 
 import math
-import sys
 from types import SimpleNamespace
 
 import pytest
 import torch
 
-from _loader import PKG_DIR, _load, _stub_package
+from _loader import PKG_DIR, load, load_wrapper, stub_package
 
-sys.path.insert(0, str(PKG_DIR.parents[2] / "rsl_rl"))
+stub_package("bipedal_locomotion.tasks.locomotion.cfg", PKG_DIR / "tasks" / "locomotion" / "cfg")
+stub_package("bipedal_locomotion.tasks.locomotion.cfg.WF_TRON1B", PKG_DIR / "tasks" / "locomotion" / "cfg" / "WF_TRON1B")
+load("bipedal_locomotion.tasks.locomotion.cfg.WF_TRON1B.constants", "tasks/locomotion/cfg/WF_TRON1B/constants.py")
+exporter = load_wrapper("exporter")
 from rsl_rl.models import DepthRepresentationVelocityActorCritic, RepresentationVelocityActorCritic  # noqa: E402
-
-_stub_package("bipedal_locomotion.tasks.locomotion.cfg", PKG_DIR / "tasks" / "locomotion" / "cfg")
-_stub_package("bipedal_locomotion.tasks.locomotion.cfg.WF_TRON1B", PKG_DIR / "tasks" / "locomotion" / "cfg" / "WF_TRON1B")
-_load("bipedal_locomotion.tasks.locomotion.cfg.WF_TRON1B.constants", "tasks/locomotion/cfg/WF_TRON1B/constants.py")
-_stub_package("bipedal_locomotion.utils.wrappers", PKG_DIR / "utils" / "wrappers")
-_stub_package("bipedal_locomotion.utils.wrappers.rsl_rl", PKG_DIR / "utils" / "wrappers" / "rsl_rl")
-exporter = _load("bipedal_locomotion.utils.wrappers.rsl_rl.exporter", "utils/wrappers/rsl_rl/exporter.py")
 
 MJCF_JOINTS = [
     "abad_L_Joint", "hip_L_Joint", "knee_L_Joint", "wheel_L_Joint",
