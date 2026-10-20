@@ -107,6 +107,8 @@ class RslRlVecEnvWrapper(VecEnv):
         if self.clip_actions is not None:
             actions = torch.clamp(actions, -self.clip_actions, self.clip_actions)
         obs_dict, rew, terminated, truncated, extras = self.env.step(actions)
+        # A diverged environment must not poison the update (mjlab zeroes each non-finite reward term).
+        rew = torch.nan_to_num(rew, nan=0.0, posinf=0.0, neginf=0.0)
         # Metrics staged by reward / termination terms (see `mdp.log_metric`).
         extras.setdefault("log", {}).update(self.unwrapped.__dict__.pop("_step_metrics", {}))
         dones = (terminated | truncated).to(dtype=torch.long)
